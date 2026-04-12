@@ -411,6 +411,9 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
   // Onboarding modal
   const [showOnboarding, setShowOnboarding] = useState(false);
 
+  // History expanded item
+  const [expandedPodcastId, setExpandedPodcastId] = useState<string | null>(null);
+
   const supabase = createClient();
   const router = useRouter();
 
@@ -659,13 +662,12 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
   const audio = result ? (result as Record<string, unknown>).audio as { provider: string; available: boolean } | undefined : undefined;
 
   return (
-    <div className="min-h-screen bg-[#FAFAF8]">
-
+    <>
       {/* Onboarding modal */}
       {showOnboarding && <OnboardingModal onDismiss={dismissOnboarding} />}
 
-      {/* ── Top nav ───────────────────────────────────────────────────────── */}
-      <nav className="bg-white border-b border-[#E8E4DC] px-6 py-4 sticky top-0 z-40">
+      {/* ── Top nav (fixed to viewport) ──────────────────────────────────── */}
+      <nav className="bg-white border-b border-[#E8E4DC] px-6 py-4 fixed top-0 left-0 right-0 z-40">
         <div className="max-w-5xl mx-auto flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2">
             <div className="w-7 h-7 bg-[#1A7A6E] rounded-md flex items-center justify-center">
@@ -697,6 +699,8 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
         </div>
       </nav>
 
+      {/* Body — offset for fixed nav (nav is ~65px tall) */}
+      <div className="min-h-screen bg-[#FAFAF8] pt-[65px]">
       <div className="max-w-5xl mx-auto px-6 py-8">
         {/* ── Tab nav ───────────────────────────────────────────────────────── */}
         <div className="flex gap-1 bg-[#F5F3EF] border border-[#E8E4DC] p-1 rounded-xl w-fit mb-8">
@@ -707,6 +711,7 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
           ] as const).map((tab) => (
             <button
               key={tab.id}
+              type="button"
               onClick={() => setActiveTab(tab.id)}
               className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                 activeTab === tab.id
@@ -1184,21 +1189,80 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
               </div>
             ) : (
               <div className="space-y-3">
-                {podcasts.map((pod) => (
-                  <div key={pod.id} className="bg-white rounded-2xl border border-[#E8E4DC] shadow-sm p-5 flex items-center justify-between gap-4">
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-[#1B2B4B] truncate">{pod.address}</p>
-                      <p className="text-sm text-[#1B2B4B]/40 mt-0.5">
-                        {pod.city && pod.state ? `${pod.city}, ${pod.state} · ` : ""}
-                        {pod.zestimate ? `Est. ${formatCurrency(pod.zestimate)} · ` : ""}
-                        {new Date(pod.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                      </p>
+                {podcasts.map((pod) => {
+                  const isExpanded = expandedPodcastId === pod.id;
+                  return (
+                    <div key={pod.id} className="bg-white rounded-2xl border border-[#E8E4DC] shadow-sm overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => setExpandedPodcastId(isExpanded ? null : pod.id)}
+                        className="w-full p-5 flex items-center justify-between gap-4 text-left hover:bg-[#FAFAF8] transition-colors"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-[#1B2B4B] truncate">{pod.address}</p>
+                          <p className="text-sm text-[#1B2B4B]/40 mt-0.5">
+                            {pod.city && pod.state ? `${pod.city}, ${pod.state} · ` : ""}
+                            {pod.zestimate ? `Est. ${formatCurrency(pod.zestimate)} · ` : ""}
+                            {new Date(pod.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <span className="text-xs text-[#1A7A6E] bg-[#EDF4F3] border border-[#1A7A6E]/20 px-2 py-1 rounded-lg font-medium">
+                            Completed
+                          </span>
+                          <svg
+                            className={`w-4 h-4 text-[#1B2B4B]/30 transition-transform ${isExpanded ? "rotate-180" : ""}`}
+                            fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                          >
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                          </svg>
+                        </div>
+                      </button>
+
+                      {isExpanded && (
+                        <div className="border-t border-[#E8E4DC] px-5 pb-5 pt-4 space-y-4">
+                          {/* Replay from history */}
+                          {pod.script_text && (
+                            <div>
+                              <h4 className="text-xs font-semibold text-[#1B2B4B]/50 uppercase tracking-wide mb-3">Script</h4>
+                              <div className="bg-[#FAFAF8] rounded-xl border border-[#E8E4DC] p-4">
+                                <p className="text-sm text-[#1B2B4B]/60 leading-relaxed whitespace-pre-wrap line-clamp-6">{pod.script_text}</p>
+                              </div>
+                            </div>
+                          )}
+                          <div className="flex items-center gap-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!pod.script_text || typeof window === "undefined") return;
+                                window.speechSynthesis.cancel();
+                                const utterance = new SpeechSynthesisUtterance(pod.script_text);
+                                utterance.rate = 0.95;
+                                const voices = window.speechSynthesis.getVoices();
+                                const preferred = voices.find(v => v.name.includes("Samantha") || v.name.includes("Google US English") || v.name.includes("Karen"));
+                                if (preferred) utterance.voice = preferred;
+                                window.speechSynthesis.speak(utterance);
+                              }}
+                              className="flex items-center gap-1.5 bg-[#1A7A6E] hover:bg-[#15695F] text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors"
+                            >
+                              ▶ Replay
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAddress(pod.address);
+                                setActiveTab("generate");
+                              }}
+                              className="flex items-center gap-1.5 border border-[#E8E4DC] text-[#1B2B4B]/60 hover:bg-[#F5F3EF] text-sm font-medium px-4 py-2 rounded-xl transition-colors"
+                            >
+                              🔄 Regenerate
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                    <span className="text-xs text-[#1A7A6E] bg-[#EDF4F3] border border-[#1A7A6E]/20 px-2 py-1 rounded-lg flex-shrink-0 font-medium">
-                      Completed
-                    </span>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1279,6 +1343,7 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
           </div>
         )}
       </div>
-    </div>
+      </div>
+    </>
   );
 }
