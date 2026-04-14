@@ -5,9 +5,10 @@ import Link from "next/link";
 import { createClient } from "@/app/lib/supabase/client";
 import { useRouter } from "next/navigation";
 
-// ─── Address autocomplete ────────────────────────────────────────────────────
+// ─── Address autocomplete (Google Places) ────────────────────────────────────
 
 interface AddressSuggestion {
+  placeId: string;
   formatted: string;
   street: string;
   cityStateZip: string;
@@ -18,17 +19,15 @@ interface UserLocation {
   lon: number;
 }
 
-// In-memory cache: avoid re-fetching identical queries within the session
+// Session-level cache — identical queries never re-fetch
 const suggestionCache = new Map<string, AddressSuggestion[]>();
 
-// Cached user location (resolved once per session from IP)
+// Cached IP location (resolved once per session)
 let cachedUserLocation: UserLocation | null = null;
 let locationFetchPromise: Promise<UserLocation | null> | null = null;
 
-// Resolve approximate user location from IP — called once on mount, cached forever
 async function resolveUserLocation(): Promise<UserLocation | null> {
   if (cachedUserLocation) return cachedUserLocation;
-  // Only one concurrent fetch — reuse the same promise if called multiple times
   if (locationFetchPromise) return locationFetchPromise;
   locationFetchPromise = (async () => {
     try {
@@ -39,111 +38,10 @@ async function resolveUserLocation(): Promise<UserLocation | null> {
         cachedUserLocation = { lat: data.latitude, lon: data.longitude };
         return cachedUserLocation;
       }
-    } catch {
-      // ignore — location bias is an enhancement, not a requirement
-    }
+    } catch { /* location bias is best-effort */ }
     return null;
   })();
   return locationFetchPromise;
-}
-
-// Detect if query looks like it starts with a house number (e.g. "1884 flem")
-function queryHasHouseNumber(q: string): boolean {
-  return /^\d+\s+\S/.test(q.trim());
-}
-
-// Parse Photon features into AddressSuggestion[]
-function parsePhotonFeatures(
-  features: Record<string, unknown>[],
-  requireHouseNumber: boolean
-): AddressSuggestion[] {
-  const results: AddressSuggestion[] = [];
-  const seen = new Set<string>();
-  for (const f of features) {
-    const p = (f.properties as Record<string, string>) ?? {};
-    if (!p.street) continue;
-    if (p.countrycode && p.countrycode !== "US") continue;
-    if (requireHouseNumber && !p.housenumber) continue;
-    const houseNum = p.housenumber ? `${p.housenumber} ` : "";
-    const street = `${houseNum}${p.street}`;
-    const city = p.city || p.town || p.village || "";
-    const state = p.state || "";
-    const zip = p.postcode || "";
-    const cityStateZip = [city, state, zip].filter(Boolean).join(", ");
-    const formatted = [street, city, state, zip].filter(Boolean).join(", ");
-    const key = formatted.toLowerCase();
-    if (formatted.length > 8 && !seen.has(key)) {
-      seen.add(key);
-      results.push({ formatted, street, cityStateZip });
-    }
-    if (results.length >= 6) break;
-  }
-  return results;
-}
-
-// Photon (Komoot) — fast geocoder with optional location bias
-// Uses two layers: 'house' for exact address matches, 'street' for partial street name queries
-async function fetchPhotonAddresses(
-  query: string,
-  signal: AbortSignal,
-  location?: UserLocation | null
-): Promise<AddressSuggestion[]> {
-  const q = query.trim();
-  if (q.length < 2) return [];
-
-  const locParams = location ? `&lat=${location.lat}&lon=${location.lon}` : "";
-  const base = `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=8&bbox=-125,24,-66,50${locParams}`;
-
-  const hasHouseNum = queryHasHouseNumber(q);
-
-  if (hasHouseNum) {
-    // Query has a number prefix (e.g. "1884 Fleming") — search house layer first
-    // If that returns < 2 results, also check street layer and build suggestions
-    const [houseRes, streetRes] = await Promise.allSettled([
-      fetch(`${base}&layer=house`, { signal }).then(r => r.ok ? r.json() : { features: [] }),
-      fetch(`${base}&layer=street`, { signal }).then(r => r.ok ? r.json() : { features: [] }),
-    ]);
-
-    const houseFeatures = houseRes.status === "fulfilled" ? ((houseRes.value.features ?? []) as Record<string, unknown>[]) : [];
-    const streetFeatures = streetRes.status === "fulfilled" ? ((streetRes.value.features ?? []) as Record<string, unknown>[]) : [];
-
-    const houseResults = parsePhotonFeatures(houseFeatures, true);
-
-    if (houseResults.length >= 2) return houseResults;
-
-    // Build suggestions from street layer: prepend the typed house number onto matched streets
-    const numPrefix = q.match(/^(\d+)/)?.[1] ?? "";
-    const streetSuggestions: AddressSuggestion[] = [];
-    const seen = new Set<string>(houseResults.map(r => r.formatted.toLowerCase()));
-
-    for (const f of streetFeatures) {
-      const p = (f.properties as Record<string, string>) ?? {};
-      if (!p.street) continue;
-      if (p.countrycode && p.countrycode !== "US") continue;
-      const street = `${numPrefix} ${p.street}`;
-      const city = p.city || p.town || p.village || "";
-      const state = p.state || "";
-      const zip = p.postcode || "";
-      const cityStateZip = [city, state, zip].filter(Boolean).join(", ");
-      const formatted = [street, city, state, zip].filter(Boolean).join(", ");
-      const key = formatted.toLowerCase();
-      if (!seen.has(key)) {
-        seen.add(key);
-        streetSuggestions.push({ formatted, street, cityStateZip });
-      }
-      if (streetSuggestions.length >= 5) break;
-    }
-
-    // Merge: confirmed house numbers first, then street-based suggestions
-    const merged = [...houseResults, ...streetSuggestions].slice(0, 6);
-    return merged;
-  } else {
-    // Pure street name query — search street layer
-    const res = await fetch(`${base}&layer=street`, { signal });
-    if (!res.ok) return [];
-    const data = await res.json();
-    return parsePhotonFeatures((data.features ?? []) as Record<string, unknown>[], false);
-  }
 }
 
 function AddressAutocomplete({
@@ -166,11 +64,9 @@ function AddressAutocomplete({
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Resolve IP-based location on mount — non-blocking, best-effort
+  // Resolve IP location on mount — non-blocking, best-effort
   useEffect(() => {
-    resolveUserLocation().then(loc => {
-      if (loc) setUserLocation(loc);
-    });
+    resolveUserLocation().then(loc => { if (loc) setUserLocation(loc); });
   }, []);
 
   const fetchSuggestions = useCallback(async (query: string, location: UserLocation | null) => {
@@ -181,7 +77,7 @@ function AddressAutocomplete({
       setSuggestions([]); setShowDropdown(false); setLoading(false); return;
     }
 
-    // Serve from cache instantly if available
+    // Instant cache hit
     if (suggestionCache.has(q)) {
       const cached = suggestionCache.get(q)!;
       setSuggestions(cached);
@@ -190,7 +86,6 @@ function AddressAutocomplete({
       return;
     }
 
-    // Cancel any in-flight request
     if (abortRef.current) abortRef.current.abort();
     abortRef.current = new AbortController();
     const signal = abortRef.current.signal;
@@ -198,15 +93,21 @@ function AddressAutocomplete({
     setLoading(true);
 
     try {
-      // Photon with IP-based location bias — results closest to user float first
-      const results = await fetchPhotonAddresses(q, signal, location);
+      const params = new URLSearchParams({ q });
+      if (location) {
+        params.set("lat", String(location.lat));
+        params.set("lon", String(location.lon));
+      }
+      const res = await fetch(`/api/places?${params}`, { signal });
+      if (!res.ok) throw new Error("places error");
+      const data = await res.json();
+      const results: AddressSuggestion[] = data.results ?? [];
 
       if (latestQueryRef.current !== q) return;
 
       setSuggestions(results);
       setShowDropdown(results.length > 0);
       setActiveIndex(-1);
-      setLoading(false);
       if (results.length > 0) suggestionCache.set(q, results);
     } catch (e: unknown) {
       if (e instanceof Error && e.name !== "AbortError") {
@@ -222,7 +123,6 @@ function AddressAutocomplete({
     onChange(val);
     setActiveIndex(-1);
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    // 120ms debounce — fast enough to feel instant
     debounceRef.current = setTimeout(() => fetchSuggestions(val, userLocation), 120);
   }
 
@@ -305,7 +205,7 @@ function AddressAutocomplete({
         >
           {suggestions.map((s, i) => (
             <li
-              key={i}
+              key={s.placeId}
               role="option"
               aria-selected={i === activeIndex}
               onMouseDown={() => handleSelect(s)}
@@ -325,8 +225,8 @@ function AddressAutocomplete({
             </li>
           ))}
           <li className="px-4 py-2 text-xs text-[#1B2B4B]/25 bg-[#F5F3EF] flex items-center justify-between">
-            <span>Real address data</span>
-            <span>Komoot + OpenStreetMap</span>
+            <span>Powered by</span>
+            <span>Google Maps</span>
           </li>
         </ul>
       )}
