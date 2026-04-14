@@ -47,7 +47,42 @@ async function resolveUserLocation(): Promise<UserLocation | null> {
   return locationFetchPromise;
 }
 
+// Detect if query looks like it starts with a house number (e.g. "1884 flem")
+function queryHasHouseNumber(q: string): boolean {
+  return /^\d+\s+\S/.test(q.trim());
+}
+
+// Parse Photon features into AddressSuggestion[]
+function parsePhotonFeatures(
+  features: Record<string, unknown>[],
+  requireHouseNumber: boolean
+): AddressSuggestion[] {
+  const results: AddressSuggestion[] = [];
+  const seen = new Set<string>();
+  for (const f of features) {
+    const p = (f.properties as Record<string, string>) ?? {};
+    if (!p.street) continue;
+    if (p.countrycode && p.countrycode !== "US") continue;
+    if (requireHouseNumber && !p.housenumber) continue;
+    const houseNum = p.housenumber ? `${p.housenumber} ` : "";
+    const street = `${houseNum}${p.street}`;
+    const city = p.city || p.town || p.village || "";
+    const state = p.state || "";
+    const zip = p.postcode || "";
+    const cityStateZip = [city, state, zip].filter(Boolean).join(", ");
+    const formatted = [street, city, state, zip].filter(Boolean).join(", ");
+    const key = formatted.toLowerCase();
+    if (formatted.length > 8 && !seen.has(key)) {
+      seen.add(key);
+      results.push({ formatted, street, cityStateZip });
+    }
+    if (results.length >= 6) break;
+  }
+  return results;
+}
+
 // Photon (Komoot) — fast geocoder with optional location bias
+// Uses two layers: 'house' for exact address matches, 'street' for partial street name queries
 async function fetchPhotonAddresses(
   query: string,
   signal: AbortSignal,
@@ -55,32 +90,60 @@ async function fetchPhotonAddresses(
 ): Promise<AddressSuggestion[]> {
   const q = query.trim();
   if (q.length < 2) return [];
-  // Build URL: add lat/lon bias if we have a location (Photon sorts nearest first)
+
   const locParams = location ? `&lat=${location.lat}&lon=${location.lon}` : "";
-  const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=8&layer=house&bbox=-125,24,-66,50${locParams}`;
-  const res = await fetch(url, { signal });
-  if (!res.ok) return [];
-  const data = await res.json();
-  const features = (data.features ?? []) as Record<string, unknown>[];
-  const results: AddressSuggestion[] = [];
-  for (const f of features) {
-    const p = (f.properties as Record<string, string>) ?? {};
-    if (!p.street) continue;
-    const houseNum = p.housenumber ? `${p.housenumber} ` : "";
-    const street = `${houseNum}${p.street}`;
-    const city = p.city || p.town || p.village || "";
-    const state = p.state || "";
-    const zip = p.postcode || "";
-    // Filter to US only
-    if (p.countrycode && p.countrycode !== "US") continue;
-    const cityStateZip = [city, state, zip].filter(Boolean).join(", ");
-    const formatted = [street, city, state, zip].filter(Boolean).join(", ");
-    if (formatted.length > 8 && !results.find(r => r.formatted === formatted)) {
-      results.push({ formatted, street, cityStateZip });
+  const base = `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=8&bbox=-125,24,-66,50${locParams}`;
+
+  const hasHouseNum = queryHasHouseNumber(q);
+
+  if (hasHouseNum) {
+    // Query has a number prefix (e.g. "1884 Fleming") — search house layer first
+    // If that returns < 2 results, also check street layer and build suggestions
+    const [houseRes, streetRes] = await Promise.allSettled([
+      fetch(`${base}&layer=house`, { signal }).then(r => r.ok ? r.json() : { features: [] }),
+      fetch(`${base}&layer=street`, { signal }).then(r => r.ok ? r.json() : { features: [] }),
+    ]);
+
+    const houseFeatures = houseRes.status === "fulfilled" ? ((houseRes.value.features ?? []) as Record<string, unknown>[]) : [];
+    const streetFeatures = streetRes.status === "fulfilled" ? ((streetRes.value.features ?? []) as Record<string, unknown>[]) : [];
+
+    const houseResults = parsePhotonFeatures(houseFeatures, true);
+
+    if (houseResults.length >= 2) return houseResults;
+
+    // Build suggestions from street layer: prepend the typed house number onto matched streets
+    const numPrefix = q.match(/^(\d+)/)?.[1] ?? "";
+    const streetSuggestions: AddressSuggestion[] = [];
+    const seen = new Set<string>(houseResults.map(r => r.formatted.toLowerCase()));
+
+    for (const f of streetFeatures) {
+      const p = (f.properties as Record<string, string>) ?? {};
+      if (!p.street) continue;
+      if (p.countrycode && p.countrycode !== "US") continue;
+      const street = `${numPrefix} ${p.street}`;
+      const city = p.city || p.town || p.village || "";
+      const state = p.state || "";
+      const zip = p.postcode || "";
+      const cityStateZip = [city, state, zip].filter(Boolean).join(", ");
+      const formatted = [street, city, state, zip].filter(Boolean).join(", ");
+      const key = formatted.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        streetSuggestions.push({ formatted, street, cityStateZip });
+      }
+      if (streetSuggestions.length >= 5) break;
     }
-    if (results.length >= 6) break;
+
+    // Merge: confirmed house numbers first, then street-based suggestions
+    const merged = [...houseResults, ...streetSuggestions].slice(0, 6);
+    return merged;
+  } else {
+    // Pure street name query — search street layer
+    const res = await fetch(`${base}&layer=street`, { signal });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return parsePhotonFeatures((data.features ?? []) as Record<string, unknown>[], false);
   }
-  return results;
 }
 
 function AddressAutocomplete({
