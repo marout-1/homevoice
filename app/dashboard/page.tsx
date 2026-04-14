@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { createClient } from "@/app/lib/supabase/server";
+import { createClient, createServiceClient } from "@/app/lib/supabase/server";
 import DashboardClient from "./DashboardClient";
 
 export default async function DashboardPage() {
@@ -8,8 +8,9 @@ export default async function DashboardPage() {
 
   if (!user) redirect("/login");
 
-  // Fetch user profile
-  const { data: profile } = await supabase
+  // Use service client to fetch profile so RLS never masks is_admin
+  const serviceClient = createServiceClient();
+  const { data: profile } = await serviceClient
     .from("profiles")
     .select("*")
     .eq("id", user.id)
@@ -17,7 +18,7 @@ export default async function DashboardPage() {
 
   // Reset monthly counter if needed
   if (profile?.usage_reset_at && new Date(profile.usage_reset_at) <= new Date()) {
-    await supabase
+    await serviceClient
       .from("profiles")
       .update({
         podcasts_this_month: 0,

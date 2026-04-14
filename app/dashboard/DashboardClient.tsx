@@ -8,25 +8,18 @@ import { useRouter } from "next/navigation";
 // ─── Address autocomplete ────────────────────────────────────────────────────
 
 interface AddressSuggestion {
-  formatted: string;   // full display string
-  street: string;      // just the street line
+  formatted: string;
+  street: string;
   cityStateZip: string;
 }
 
-// Nominatim (OpenStreetMap) — free, no API key, real US addresses
-async function fetchNominatimAddresses(query: string, signal: AbortSignal): Promise<AddressSuggestion[]> {
-  if (query.trim().length < 5) return [];
-  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&addressdetails=1&countrycodes=us&limit=6&dedupe=1`;
-  const res = await fetch(url, {
-    signal,
-    headers: { "Accept-Language": "en-US,en", "User-Agent": "HomeVoice/1.0" },
-  });
-  if (!res.ok) return [];
-  const data = await res.json();
+// In-memory cache: avoid re-fetching identical queries within the session
+const suggestionCache = new Map<string, AddressSuggestion[]>();
+
+function parsedNominatimResults(data: Record<string, unknown>[]): AddressSuggestion[] {
   const results: AddressSuggestion[] = [];
   for (const item of data) {
-    const a = item.address ?? {};
-    // Only include results that look like real street addresses (have house_number or road)
+    const a = (item.address as Record<string, string>) ?? {};
     if (!a.road) continue;
     const houseNum = a.house_number ? `${a.house_number} ` : "";
     const street = `${houseNum}${a.road}`;
@@ -42,29 +35,45 @@ async function fetchNominatimAddresses(query: string, signal: AbortSignal): Prom
   return results;
 }
 
-// US Census geocoder — precise match, fires when input looks complete
-async function fetchCensusAddresses(query: string, signal: AbortSignal): Promise<AddressSuggestion[]> {
-  if (!/^\d+\s+\w/.test(query.trim()) || query.trim().length < 10) return [];
-  const url = `https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=${encodeURIComponent(query)}&benchmark=Public_AR_Current&format=json`;
+// Photon (Komoot) — faster than Nominatim, no rate-limit, great for partial queries
+async function fetchPhotonAddresses(query: string, signal: AbortSignal): Promise<AddressSuggestion[]> {
+  const q = query.trim();
+  if (q.length < 3) return [];
+  const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=6&layer=house&bbox=-125,24,-66,50`;
   const res = await fetch(url, { signal });
   if (!res.ok) return [];
   const data = await res.json();
-  const matches = data?.result?.addressMatches ?? [];
-  return matches.slice(0, 3).map((m: Record<string, unknown>) => {
-    const addr = m.addressComponents as Record<string, string> ?? {};
-    const streetNum = addr.fromAddress || "";
-    const streetName = addr.streetName || "";
-    const suffix = addr.suffixType || "";
-    const preDir = addr.preDirection || "";
-    const postDir = addr.suffixDirection || "";
-    const city = addr.city || "";
-    const state = addr.state || "";
-    const zip = addr.zip || "";
-    const street = [streetNum, preDir, streetName, suffix, postDir].filter(Boolean).join(" ");
+  const features = (data.features ?? []) as Record<string, unknown>[];
+  const results: AddressSuggestion[] = [];
+  for (const f of features) {
+    const p = (f.properties as Record<string, string>) ?? {};
+    // Must have a street + house number to be useful
+    if (!p.street) continue;
+    const houseNum = p.housenumber ? `${p.housenumber} ` : "";
+    const street = `${houseNum}${p.street}`;
+    const city = p.city || p.town || p.village || "";
+    const state = p.state || "";
+    const zip = p.postcode || "";
+    // Filter to US only
+    if (p.countrycode && p.countrycode !== "US") continue;
     const cityStateZip = [city, state, zip].filter(Boolean).join(", ");
     const formatted = [street, city, state, zip].filter(Boolean).join(", ");
-    return { formatted, street, cityStateZip };
-  }).filter((s: AddressSuggestion) => s.formatted.length > 8);
+    if (formatted.length > 8 && !results.find(r => r.formatted === formatted)) {
+      results.push({ formatted, street, cityStateZip });
+    }
+    if (results.length >= 5) break;
+  }
+  return results;
+}
+
+// Nominatim fallback — more complete results but slower (~500ms)
+async function fetchNominatimAddresses(query: string, signal: AbortSignal): Promise<AddressSuggestion[]> {
+  const q = query.trim();
+  if (q.length < 5) return [];
+  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&addressdetails=1&countrycodes=us&limit=6&dedupe=1`;
+  const res = await fetch(url, { signal, headers: { "Accept-Language": "en-US,en", "User-Agent": "HomeVoice/1.0" } });
+  if (!res.ok) return [];
+  return parsedNominatimResults(await res.json());
 }
 
 function AddressAutocomplete({
@@ -82,45 +91,85 @@ function AddressAutocomplete({
   const [activeIndex, setActiveIndex] = useState(-1);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const latestQueryRef = useRef<string>("");
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const fetchSuggestions = useCallback(async (query: string) => {
+    const q = query.trim();
+    latestQueryRef.current = q;
+
+    if (q.length < 3) {
+      setSuggestions([]); setShowDropdown(false); setLoading(false); return;
+    }
+
+    // Serve from cache instantly if available
+    if (suggestionCache.has(q)) {
+      const cached = suggestionCache.get(q)!;
+      setSuggestions(cached);
+      setShowDropdown(cached.length > 0);
+      setLoading(false);
+      return;
+    }
+
+    // Cancel any in-flight request
     if (abortRef.current) abortRef.current.abort();
     abortRef.current = new AbortController();
     const signal = abortRef.current.signal;
 
-    if (query.trim().length < 4) {
-      setSuggestions([]); setShowDropdown(false); setLoading(false); return;
-    }
-
     setLoading(true);
+
+    // Strategy: Photon first (fast, ~100-200ms). Show results immediately.
+    // Then Nominatim in background — merge in if it returns better results.
     try {
-      // Run both in parallel; census results are more precise so they take priority
-      const [nominatim, census] = await Promise.allSettled([
-        fetchNominatimAddresses(query, signal),
-        fetchCensusAddresses(query, signal),
-      ]);
+      const photonResults = await fetchPhotonAddresses(q, signal);
 
-      const nominatimResults = nominatim.status === "fulfilled" ? nominatim.value : [];
-      const censusResults = census.status === "fulfilled" ? census.value : [];
+      // Only update if this is still the latest query
+      if (latestQueryRef.current !== q) return;
 
-      // Merge: census results first (exact matches), then nominatim fills in
-      const seen = new Set<string>();
-      const merged: AddressSuggestion[] = [];
-      for (const r of [...censusResults, ...nominatimResults]) {
-        const key = r.formatted.toLowerCase();
-        if (!seen.has(key)) { seen.add(key); merged.push(r); }
-        if (merged.length >= 6) break;
+      if (photonResults.length > 0) {
+        setSuggestions(photonResults);
+        setShowDropdown(true);
+        setActiveIndex(-1);
+        setLoading(false);
+        suggestionCache.set(q, photonResults);
       }
 
-      setSuggestions(merged);
-      setShowDropdown(merged.length > 0);
-      setActiveIndex(-1);
+      // Fire Nominatim in parallel — only upgrade if we get better results
+      if (q.length >= 5) {
+        fetchNominatimAddresses(q, signal).then(nominatimResults => {
+          if (latestQueryRef.current !== q) return;
+          if (nominatimResults.length === 0) return;
+
+          // Merge: nominatim may have more precise house numbers
+          const seen = new Set<string>();
+          const merged: AddressSuggestion[] = [];
+          for (const r of [...nominatimResults, ...photonResults]) {
+            const key = r.formatted.toLowerCase();
+            if (!seen.has(key)) { seen.add(key); merged.push(r); }
+            if (merged.length >= 6) break;
+          }
+          setSuggestions(merged);
+          setShowDropdown(merged.length > 0);
+          suggestionCache.set(q, merged);
+        }).catch(() => {/* ignore nominatim errors */});
+      }
+
+      // If photon returned nothing, wait for nominatim
+      if (photonResults.length === 0 && q.length >= 5) {
+        const nominatimResults = await fetchNominatimAddresses(q, signal);
+        if (latestQueryRef.current !== q) return;
+        setSuggestions(nominatimResults);
+        setShowDropdown(nominatimResults.length > 0);
+        setActiveIndex(-1);
+        if (nominatimResults.length > 0) suggestionCache.set(q, nominatimResults);
+      }
     } catch (e: unknown) {
-      if (e instanceof Error && e.name !== "AbortError") setSuggestions([]);
+      if (e instanceof Error && e.name !== "AbortError") {
+        setSuggestions([]); setShowDropdown(false);
+      }
     } finally {
-      setLoading(false);
+      if (latestQueryRef.current === q) setLoading(false);
     }
   }, []);
 
@@ -129,7 +178,8 @@ function AddressAutocomplete({
     onChange(val);
     setActiveIndex(-1);
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => fetchSuggestions(val), 350);
+    // 150ms debounce — fast enough to feel instant, slow enough to not spam
+    debounceRef.current = setTimeout(() => fetchSuggestions(val), 150);
   }
 
   function handleSelect(suggestion: AddressSuggestion) {
@@ -173,7 +223,6 @@ function AddressAutocomplete({
   return (
     <div ref={containerRef} className="relative">
       <div className="relative flex items-center">
-        {/* Pin icon */}
         <span className="absolute left-3.5 text-[#1A7A6E] pointer-events-none text-base">📍</span>
         <input
           ref={inputRef}
@@ -233,7 +282,7 @@ function AddressAutocomplete({
           ))}
           <li className="px-4 py-2 text-xs text-[#1B2B4B]/25 bg-[#F5F3EF] flex items-center justify-between">
             <span>Real address data</span>
-            <span>OpenStreetMap + US Census</span>
+            <span>Komoot + OpenStreetMap</span>
           </li>
         </ul>
       )}

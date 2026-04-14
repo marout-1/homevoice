@@ -39,12 +39,13 @@ interface AuditEvent {
 }
 
 const ACTION_LABELS: Record<string, { label: string; color: string; icon: string }> = {
-  suspend:    { label: "Suspended",      color: "text-amber-600",  icon: "🚫" },
-  unsuspend:  { label: "Unsuspended",    color: "text-emerald-600",icon: "✅" },
-  delete:     { label: "Deleted",        color: "text-red-600",    icon: "🗑️" },
-  restore:    { label: "Restored",       color: "text-emerald-600",icon: "♻️" },
-  note:       { label: "Note added",     color: "text-blue-600",   icon: "📝" },
-  plan:       { label: "Plan changed",   color: "text-purple-600", icon: "⭐" },
+  suspend:          { label: "Suspended",        color: "text-amber-600",  icon: "🚫" },
+  unsuspend:        { label: "Unsuspended",      color: "text-emerald-600",icon: "✅" },
+  delete:           { label: "Deleted",          color: "text-red-600",    icon: "🗑️" },
+  restore:          { label: "Restored",         color: "text-emerald-600",icon: "♻️" },
+  note:             { label: "Note added",       color: "text-blue-600",   icon: "📝" },
+  plan:             { label: "Plan changed",     color: "text-purple-600", icon: "⭐" },
+  podcasts_deleted: { label: "Podcasts deleted", color: "text-red-500",    icon: "🎙️" },
 };
 
 function formatCurrency(n: number | null) {
@@ -54,7 +55,7 @@ function formatCurrency(n: number | null) {
 
 export default function AdminUserDetailClient({
   profile: initialProfile,
-  podcasts,
+  podcasts: initialPodcasts,
   auditEvents: initialAuditEvents,
 }: {
   profile: Profile;
@@ -63,14 +64,73 @@ export default function AdminUserDetailClient({
 }) {
   const router = useRouter();
   const [profile, setProfile] = useState(initialProfile);
+  const [podcasts, setPodcasts] = useState(initialPodcasts);
   const [auditEvents, setAuditEvents] = useState(initialAuditEvents);
   const [loading, setLoading] = useState<string | null>(null);
   const [suspendReason, setSuspendReason] = useState("");
   const [showSuspendModal, setShowSuspendModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showDeletePodcastsModal, setShowDeletePodcastsModal] = useState(false);
   const [adminNote, setAdminNote] = useState(profile.admin_notes ?? "");
   const [noteSaved, setNoteSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Podcast bulk selection
+  const [selectedPodcastIds, setSelectedPodcastIds] = useState<Set<string>>(new Set());
+  const allSelected = podcasts.length > 0 && selectedPodcastIds.size === podcasts.length;
+  const someSelected = selectedPodcastIds.size > 0;
+
+  function togglePodcast(id: string) {
+    setSelectedPodcastIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    if (allSelected) {
+      setSelectedPodcastIds(new Set());
+    } else {
+      setSelectedPodcastIds(new Set(podcasts.map(p => p.id)));
+    }
+  }
+
+  async function deleteSelectedPodcasts() {
+    setLoading("delete_podcasts");
+    setError(null);
+    setShowDeletePodcastsModal(false);
+    try {
+      const res = await fetch("/api/admin/podcasts", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ podcastIds: Array.from(selectedPodcastIds), userId: profile.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error ?? "Delete failed"); return; }
+
+      // Remove deleted podcasts from local state
+      setPodcasts(prev => prev.filter(p => !selectedPodcastIds.has(p.id)));
+      setSelectedPodcastIds(new Set());
+
+      // Update the monthly count shown in the profile card
+      setProfile(p => ({ ...p, podcasts_this_month: data.newMonthlyCount }));
+
+      // Add optimistic audit event
+      setAuditEvents(evts => [{
+        id: crypto.randomUUID(),
+        action: "podcasts_deleted",
+        details: { deleted_count: data.deleted, new_monthly_count: data.newMonthlyCount },
+        created_at: new Date().toISOString(),
+        admin_id: "",
+        admin_email: "you",
+      }, ...evts]);
+
+      router.refresh();
+    } finally {
+      setLoading(null);
+    }
+  }
 
   async function doAction(action: string, extra?: Record<string, unknown>) {
     setLoading(action);
@@ -208,17 +268,54 @@ export default function AdminUserDetailClient({
             </div>
           </div>
 
-          {/* Podcast history */}
+          {/* Podcast history with bulk delete */}
           <div className="bg-white rounded-2xl border border-[#E8E4DC] shadow-sm overflow-hidden">
-            <div className="px-6 py-4 border-b border-[#E8E4DC]">
-              <h3 className="font-semibold text-[#1B2B4B]">Recent Podcasts ({podcasts.length})</h3>
+            <div className="px-6 py-4 border-b border-[#E8E4DC] flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                {podcasts.length > 0 && (
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    ref={el => { if (el) el.indeterminate = someSelected && !allSelected; }}
+                    onChange={toggleAll}
+                    className="w-4 h-4 rounded border-[#E8E4DC] cursor-pointer accent-[#1A7A6E]"
+                  />
+                )}
+                <h3 className="font-semibold text-[#1B2B4B]">Podcasts ({podcasts.length})</h3>
+                {someSelected && (
+                  <span className="text-xs text-[#1B2B4B]/50">{selectedPodcastIds.size} selected</span>
+                )}
+              </div>
+              {someSelected && (
+                <button
+                  type="button"
+                  onClick={() => setShowDeletePodcastsModal(true)}
+                  disabled={loading === "delete_podcasts"}
+                  className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white transition-colors disabled:opacity-50"
+                >
+                  {loading === "delete_podcasts" ? "Deleting…" : `🗑️ Delete ${selectedPodcastIds.size} podcast${selectedPodcastIds.size !== 1 ? "s" : ""}`}
+                </button>
+              )}
             </div>
             {podcasts.length === 0 ? (
               <div className="p-8 text-center text-[#1B2B4B]/30 text-sm">No podcasts yet</div>
             ) : (
               <div className="divide-y divide-[#E8E4DC]">
                 {podcasts.map(pod => (
-                  <div key={pod.id} className="px-6 py-3.5 flex items-center justify-between gap-3">
+                  <div
+                    key={pod.id}
+                    onClick={() => togglePodcast(pod.id)}
+                    className={`px-6 py-3.5 flex items-center gap-3 cursor-pointer transition-colors ${
+                      selectedPodcastIds.has(pod.id) ? "bg-red-50" : "hover:bg-[#FAFAF8]"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedPodcastIds.has(pod.id)}
+                      onChange={() => togglePodcast(pod.id)}
+                      onClick={e => e.stopPropagation()}
+                      className="w-4 h-4 rounded border-[#E8E4DC] cursor-pointer accent-[#1A7A6E] flex-shrink-0"
+                    />
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-[#1B2B4B] truncate">{pod.address}</p>
                       <p className="text-xs text-[#1B2B4B]/40 mt-0.5">
@@ -368,7 +465,36 @@ export default function AdminUserDetailClient({
         </div>
       )}
 
-      {/* Delete modal */}
+      {/* Delete podcasts confirmation modal */}
+      {showDeletePodcastsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl border border-[#E8E4DC] shadow-2xl max-w-sm w-full p-6">
+            <h3 className="font-bold text-[#1B2B4B] mb-1">Delete {selectedPodcastIds.size} podcast{selectedPodcastIds.size !== 1 ? "s" : ""}?</h3>
+            <p className="text-sm text-[#1B2B4B]/50 mb-1">
+              This will permanently delete the selected podcasts for <strong>{profile.email}</strong> and update their monthly count.
+            </p>
+            <p className="text-xs text-red-500 mb-4">This cannot be undone.</p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setShowDeletePodcastsModal(false)}
+                className="flex-1 text-sm py-2.5 rounded-xl border border-[#E8E4DC] text-[#1B2B4B]/60 hover:bg-[#F5F3EF] transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={deleteSelectedPodcasts}
+                className="flex-1 text-sm font-semibold py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white transition-colors"
+              >
+                Delete permanently
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete account modal */}
       {showDeleteModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
           <div className="bg-white rounded-2xl border border-[#E8E4DC] shadow-2xl max-w-sm w-full p-6">
