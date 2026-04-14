@@ -11,6 +11,7 @@ create table if not exists public.profiles (
   plan text default 'free' check (plan in ('free', 'pro')),
   podcasts_this_month integer default 0,
   usage_reset_at timestamptz default date_trunc('month', now()) + interval '1 month',
+  welcome_email_sent boolean default false,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );

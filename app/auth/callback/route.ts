@@ -24,8 +24,18 @@ export async function GET(request: NextRequest) {
       }
     );
 
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
-    if (!error) {
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+    if (!error && data.user) {
+      // Fire welcome email non-blocking — doesn't delay redirect
+      fetch(`${origin}/api/welcome-email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: data.user.id,
+          email: data.user.email,
+        }),
+      }).catch(() => {/* best-effort */});
+
       return NextResponse.redirect(`${origin}${next}`);
     }
   }
