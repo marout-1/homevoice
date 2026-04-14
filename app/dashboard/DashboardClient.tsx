@@ -13,33 +13,51 @@ interface AddressSuggestion {
   cityStateZip: string;
 }
 
+interface UserLocation {
+  lat: number;
+  lon: number;
+}
+
 // In-memory cache: avoid re-fetching identical queries within the session
 const suggestionCache = new Map<string, AddressSuggestion[]>();
 
-function parsedNominatimResults(data: Record<string, unknown>[]): AddressSuggestion[] {
-  const results: AddressSuggestion[] = [];
-  for (const item of data) {
-    const a = (item.address as Record<string, string>) ?? {};
-    if (!a.road) continue;
-    const houseNum = a.house_number ? `${a.house_number} ` : "";
-    const street = `${houseNum}${a.road}`;
-    const city = a.city || a.town || a.village || a.county || "";
-    const state = a.state || "";
-    const zip = a.postcode || "";
-    const cityStateZip = [city, state, zip].filter(Boolean).join(", ");
-    const formatted = [street, city, state, zip].filter(Boolean).join(", ");
-    if (formatted.length > 8 && !results.find(r => r.formatted === formatted)) {
-      results.push({ formatted, street, cityStateZip });
+// Cached user location (resolved once per session from IP)
+let cachedUserLocation: UserLocation | null = null;
+let locationFetchPromise: Promise<UserLocation | null> | null = null;
+
+// Resolve approximate user location from IP — called once on mount, cached forever
+async function resolveUserLocation(): Promise<UserLocation | null> {
+  if (cachedUserLocation) return cachedUserLocation;
+  // Only one concurrent fetch — reuse the same promise if called multiple times
+  if (locationFetchPromise) return locationFetchPromise;
+  locationFetchPromise = (async () => {
+    try {
+      const res = await fetch("https://ipapi.co/json/", { signal: AbortSignal.timeout(2000) });
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (typeof data.latitude === "number" && typeof data.longitude === "number") {
+        cachedUserLocation = { lat: data.latitude, lon: data.longitude };
+        return cachedUserLocation;
+      }
+    } catch {
+      // ignore — location bias is an enhancement, not a requirement
     }
-  }
-  return results;
+    return null;
+  })();
+  return locationFetchPromise;
 }
 
-// Photon (Komoot) — faster than Nominatim, no rate-limit, great for partial queries
-async function fetchPhotonAddresses(query: string, signal: AbortSignal): Promise<AddressSuggestion[]> {
+// Photon (Komoot) — fast geocoder with optional location bias
+async function fetchPhotonAddresses(
+  query: string,
+  signal: AbortSignal,
+  location?: UserLocation | null
+): Promise<AddressSuggestion[]> {
   const q = query.trim();
-  if (q.length < 3) return [];
-  const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=6&layer=house&bbox=-125,24,-66,50`;
+  if (q.length < 2) return [];
+  // Build URL: add lat/lon bias if we have a location (Photon sorts nearest first)
+  const locParams = location ? `&lat=${location.lat}&lon=${location.lon}` : "";
+  const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=8&layer=house&bbox=-125,24,-66,50${locParams}`;
   const res = await fetch(url, { signal });
   if (!res.ok) return [];
   const data = await res.json();
@@ -47,7 +65,6 @@ async function fetchPhotonAddresses(query: string, signal: AbortSignal): Promise
   const results: AddressSuggestion[] = [];
   for (const f of features) {
     const p = (f.properties as Record<string, string>) ?? {};
-    // Must have a street + house number to be useful
     if (!p.street) continue;
     const houseNum = p.housenumber ? `${p.housenumber} ` : "";
     const street = `${houseNum}${p.street}`;
@@ -61,19 +78,9 @@ async function fetchPhotonAddresses(query: string, signal: AbortSignal): Promise
     if (formatted.length > 8 && !results.find(r => r.formatted === formatted)) {
       results.push({ formatted, street, cityStateZip });
     }
-    if (results.length >= 5) break;
+    if (results.length >= 6) break;
   }
   return results;
-}
-
-// Nominatim fallback — more complete results but slower (~500ms)
-async function fetchNominatimAddresses(query: string, signal: AbortSignal): Promise<AddressSuggestion[]> {
-  const q = query.trim();
-  if (q.length < 5) return [];
-  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&addressdetails=1&countrycodes=us&limit=6&dedupe=1`;
-  const res = await fetch(url, { signal, headers: { "Accept-Language": "en-US,en", "User-Agent": "HomeVoice/1.0" } });
-  if (!res.ok) return [];
-  return parsedNominatimResults(await res.json());
 }
 
 function AddressAutocomplete({
@@ -89,17 +96,25 @@ function AddressAutocomplete({
   const [showDropdown, setShowDropdown] = useState(false);
   const [loading, setLoading] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
+  const [userLocation, setUserLocation] = useState<UserLocation | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const latestQueryRef = useRef<string>("");
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const fetchSuggestions = useCallback(async (query: string) => {
+  // Resolve IP-based location on mount — non-blocking, best-effort
+  useEffect(() => {
+    resolveUserLocation().then(loc => {
+      if (loc) setUserLocation(loc);
+    });
+  }, []);
+
+  const fetchSuggestions = useCallback(async (query: string, location: UserLocation | null) => {
     const q = query.trim();
     latestQueryRef.current = q;
 
-    if (q.length < 3) {
+    if (q.length < 2) {
       setSuggestions([]); setShowDropdown(false); setLoading(false); return;
     }
 
@@ -119,51 +134,17 @@ function AddressAutocomplete({
 
     setLoading(true);
 
-    // Strategy: Photon first (fast, ~100-200ms). Show results immediately.
-    // Then Nominatim in background — merge in if it returns better results.
     try {
-      const photonResults = await fetchPhotonAddresses(q, signal);
+      // Photon with IP-based location bias — results closest to user float first
+      const results = await fetchPhotonAddresses(q, signal, location);
 
-      // Only update if this is still the latest query
       if (latestQueryRef.current !== q) return;
 
-      if (photonResults.length > 0) {
-        setSuggestions(photonResults);
-        setShowDropdown(true);
-        setActiveIndex(-1);
-        setLoading(false);
-        suggestionCache.set(q, photonResults);
-      }
-
-      // Fire Nominatim in parallel — only upgrade if we get better results
-      if (q.length >= 5) {
-        fetchNominatimAddresses(q, signal).then(nominatimResults => {
-          if (latestQueryRef.current !== q) return;
-          if (nominatimResults.length === 0) return;
-
-          // Merge: nominatim may have more precise house numbers
-          const seen = new Set<string>();
-          const merged: AddressSuggestion[] = [];
-          for (const r of [...nominatimResults, ...photonResults]) {
-            const key = r.formatted.toLowerCase();
-            if (!seen.has(key)) { seen.add(key); merged.push(r); }
-            if (merged.length >= 6) break;
-          }
-          setSuggestions(merged);
-          setShowDropdown(merged.length > 0);
-          suggestionCache.set(q, merged);
-        }).catch(() => {/* ignore nominatim errors */});
-      }
-
-      // If photon returned nothing, wait for nominatim
-      if (photonResults.length === 0 && q.length >= 5) {
-        const nominatimResults = await fetchNominatimAddresses(q, signal);
-        if (latestQueryRef.current !== q) return;
-        setSuggestions(nominatimResults);
-        setShowDropdown(nominatimResults.length > 0);
-        setActiveIndex(-1);
-        if (nominatimResults.length > 0) suggestionCache.set(q, nominatimResults);
-      }
+      setSuggestions(results);
+      setShowDropdown(results.length > 0);
+      setActiveIndex(-1);
+      setLoading(false);
+      if (results.length > 0) suggestionCache.set(q, results);
     } catch (e: unknown) {
       if (e instanceof Error && e.name !== "AbortError") {
         setSuggestions([]); setShowDropdown(false);
@@ -178,8 +159,8 @@ function AddressAutocomplete({
     onChange(val);
     setActiveIndex(-1);
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    // 150ms debounce — fast enough to feel instant, slow enough to not spam
-    debounceRef.current = setTimeout(() => fetchSuggestions(val), 150);
+    // 120ms debounce — fast enough to feel instant
+    debounceRef.current = setTimeout(() => fetchSuggestions(val, userLocation), 120);
   }
 
   function handleSelect(suggestion: AddressSuggestion) {
@@ -307,7 +288,7 @@ function OnboardingModal({ onDismiss }: { onDismiss: () => void }) {
     {
       emoji: "🏠",
       title: "Start with an address",
-      body: "Type any US property address in the field below. Our Census-verified autocomplete will confirm it's real. Then add your brokerage name — it appears in the outro.",
+      body: "Type any US property address in the field below. Autocomplete shows nearby addresses first based on your location. Then add your brokerage name — it appears in the outro.",
       cta: "Got it →",
     },
     {
