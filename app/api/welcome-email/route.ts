@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-function buildWelcomeEmail(email: string): string {
+function buildWelcomeEmail(_email: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -57,126 +57,177 @@ function buildWelcomeEmail(email: string): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Welcome to HomeVoice</title>
 </head>
-<body style="margin:0;padding:0;background-color:#F5F3EF;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#F5F3EF;padding:40px 20px;">
+<body style="margin:0;padding:0;background-color:#EEEAE3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background-color:#EEEAE3;padding:48px 20px;">
     <tr>
       <td align="center">
-        <table width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;">
+        <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="max-width:580px;">
 
-          <!-- Logo -->
+          <!-- HEADER -->
           <tr>
-            <td align="center" style="padding-bottom:32px;">
-              <table cellpadding="0" cellspacing="0">
+            <td align="center" style="padding-bottom:28px;">
+              <table cellpadding="0" cellspacing="0" role="presentation">
                 <tr>
-                  <td style="background-color:#1A7A6E;border-radius:12px;padding:10px 14px;">
-                    <span style="color:#ffffff;font-size:20px;font-weight:700;letter-spacing:-0.5px;">🏠 HomeVoice</span>
+                  <td style="background-color:#1A7A6E;border-radius:14px;padding:11px 18px;">
+                    <span style="color:#ffffff;font-size:18px;font-weight:700;letter-spacing:-0.4px;">🏠 HomeVoice</span>
                   </td>
                 </tr>
               </table>
             </td>
           </tr>
 
-          <!-- Card -->
+          <!-- HERO CARD -->
           <tr>
-            <td style="background-color:#ffffff;border-radius:20px;padding:48px 44px;box-shadow:0 1px 4px rgba(0,0,0,0.06);">
-
-              <p style="margin:0 0 8px 0;font-size:28px;font-weight:700;color:#1B2B4B;line-height:1.2;">
-                Welcome aboard 👋
+            <td style="background-color:#ffffff;border-radius:24px 24px 0 0;padding:52px 48px 40px;box-shadow:0 2px 8px rgba(0,0,0,0.07);">
+              <p style="margin:0 0 6px 0;font-size:13px;font-weight:600;color:#1A7A6E;text-transform:uppercase;letter-spacing:1px;">You're in 🎉</p>
+              <h1 style="margin:0 0 16px 0;font-size:32px;font-weight:800;color:#111827;line-height:1.15;letter-spacing:-0.5px;">
+                Your clients are about<br/>to <em style="font-style:italic;color:#1A7A6E;">actually</em> read your<br/>market reports.
+              </h1>
+              <p style="margin:0 0 36px 0;font-size:16px;color:#6B7280;line-height:1.6;">
+                HomeVoice turns any property address into a professional AI-narrated podcast in about 90 seconds. Here's everything you need to hit the ground running.
               </p>
-              <p style="margin:0 0 32px 0;font-size:16px;color:#6B7280;line-height:1.5;">
-                You're all set to start creating AI-narrated market reports your clients will actually listen to.
-              </p>
+              <table cellpadding="0" cellspacing="0" role="presentation">
+                <tr>
+                  <td style="border-radius:12px;background-color:#1A7A6E;">
+                    <a href="https://mattarout.vercel.app/dashboard"
+                       style="display:inline-block;padding:16px 36px;font-size:16px;font-weight:700;color:#ffffff;text-decoration:none;letter-spacing:-0.2px;border-radius:12px;">
+                      Generate your first report →
+                    </a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
 
-              <!-- What you get -->
-              <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#F5F9F8;border-radius:12px;padding:24px;margin-bottom:32px;">
+          <!-- DIVIDER BAND -->
+          <tr>
+            <td style="background-color:#1A7A6E;padding:18px 48px;">
+              <p style="margin:0;font-size:14px;font-weight:600;color:#ffffff;letter-spacing:0.2px;">
+                ⚡ From address to audio in &lt;90 seconds &nbsp;·&nbsp; 🎙️ 10 free reports/month &nbsp;·&nbsp; 🔗 Instant shareable link
+              </p>
+            </td>
+          </tr>
+
+          <!-- TIPS CARD -->
+          <tr>
+            <td style="background-color:#F9F8F6;padding:40px 48px 8px;">
+              <p style="margin:0 0 24px 0;font-size:19px;font-weight:700;color:#111827;letter-spacing:-0.3px;">Tips &amp; tricks to get started</p>
+
+              <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin-bottom:24px;">
+                <tr>
+                  <td width="48" valign="top">
+                    <div style="width:40px;height:40px;border-radius:10px;background-color:#E6F3F1;text-align:center;line-height:40px;font-size:20px;">🔍</div>
+                  </td>
+                  <td style="padding-left:16px;" valign="top">
+                    <p style="margin:0 0 4px 0;font-size:15px;font-weight:700;color:#111827;">Use the address autocomplete</p>
+                    <p style="margin:0;font-size:14px;color:#6B7280;line-height:1.55;">Start typing any US property address — Google Maps autocomplete kicks in after 2 characters. Select the exact address from the dropdown for the best results.</p>
+                  </td>
+                </tr>
+              </table>
+
+              <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin-bottom:24px;">
+                <tr>
+                  <td width="48" valign="top">
+                    <div style="width:40px;height:40px;border-radius:10px;background-color:#E6F3F1;text-align:center;line-height:40px;font-size:20px;">🏷️</div>
+                  </td>
+                  <td style="padding-left:16px;" valign="top">
+                    <p style="margin:0 0 4px 0;font-size:15px;font-weight:700;color:#111827;">Add your brokerage name</p>
+                    <p style="margin:0;font-size:14px;color:#6B7280;line-height:1.55;">Hit "Personalize" before generating — your brokerage name plays in the podcast outro so every report sounds like it came directly from your brand.</p>
+                  </td>
+                </tr>
+              </table>
+
+              <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin-bottom:24px;">
+                <tr>
+                  <td width="48" valign="top">
+                    <div style="width:40px;height:40px;border-radius:10px;background-color:#E6F3F1;text-align:center;line-height:40px;font-size:20px;">📤</div>
+                  </td>
+                  <td style="padding-left:16px;" valign="top">
+                    <p style="margin:0 0 4px 0;font-size:15px;font-weight:700;color:#111827;">Share the link — no app needed</p>
+                    <p style="margin:0;font-size:14px;color:#6B7280;line-height:1.55;">Once generated, copy the shareable link and text or email it to your client. They click, it plays — no downloads, no logins, no friction.</p>
+                  </td>
+                </tr>
+              </table>
+
+              <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin-bottom:24px;">
+                <tr>
+                  <td width="48" valign="top">
+                    <div style="width:40px;height:40px;border-radius:10px;background-color:#E6F3F1;text-align:center;line-height:40px;font-size:20px;">📊</div>
+                  </td>
+                  <td style="padding-left:16px;" valign="top">
+                    <p style="margin:0 0 4px 0;font-size:15px;font-weight:700;color:#111827;">Send it before a showing</p>
+                    <p style="margin:0;font-size:14px;color:#6B7280;line-height:1.55;">The report covers nearby comps, price trends, and neighborhood stats. Drop it in your pre-showing text so buyers walk in already informed — and impressed.</p>
+                  </td>
+                </tr>
+              </table>
+
+              <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin-bottom:8px;">
+                <tr>
+                  <td width="48" valign="top">
+                    <div style="width:40px;height:40px;border-radius:10px;background-color:#E6F3F1;text-align:center;line-height:40px;font-size:20px;">🔄</div>
+                  </td>
+                  <td style="padding-left:16px;" valign="top">
+                    <p style="margin:0 0 4px 0;font-size:15px;font-weight:700;color:#111827;">Your 10 credits reset every month</p>
+                    <p style="margin:0;font-size:14px;color:#6B7280;line-height:1.55;">Free plan gives you 10 reports per month — plenty to test with real listings. Need more? Upgrade anytime from your dashboard for unlimited access.</p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- WHAT'S INSIDE -->
+          <tr>
+            <td style="background-color:#F9F8F6;padding:32px 48px 40px;">
+              <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background-color:#111827;border-radius:16px;padding:28px 32px;">
                 <tr>
                   <td>
-                    <p style="margin:0 0 16px 0;font-size:13px;font-weight:600;color:#1A7A6E;text-transform:uppercase;letter-spacing:0.5px;">What you get for free</p>
-                    <table width="100%" cellpadding="0" cellspacing="0">
+                    <p style="margin:0 0 16px 0;font-size:13px;font-weight:600;color:#1A7A6E;text-transform:uppercase;letter-spacing:1px;">What's inside every report</p>
+                    <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
                       <tr>
-                        <td style="padding:6px 0;">
-                          <table cellpadding="0" cellspacing="0">
-                            <tr>
-                              <td style="padding-right:12px;font-size:18px;">🎙️</td>
-                              <td style="font-size:15px;color:#1B2B4B;"><strong>10 podcasts/month</strong> — reset every month</td>
-                            </tr>
-                          </table>
+                        <td width="50%" valign="top" style="padding-right:8px;">
+                          <p style="margin:0 0 10px 0;font-size:14px;color:#D1FAE5;">✓ &nbsp;Recent comparable sales</p>
+                          <p style="margin:0 0 10px 0;font-size:14px;color:#D1FAE5;">✓ &nbsp;Days on market trends</p>
+                          <p style="margin:0;font-size:14px;color:#D1FAE5;">✓ &nbsp;Price per sq ft analysis</p>
                         </td>
-                      </tr>
-                      <tr>
-                        <td style="padding:6px 0;">
-                          <table cellpadding="0" cellspacing="0">
-                            <tr>
-                              <td style="padding-right:12px;font-size:18px;">📊</td>
-                              <td style="font-size:15px;color:#1B2B4B;"><strong>Live market data</strong> — comps, trends, valuations</td>
-                            </tr>
-                          </table>
-                        </td>
-                      </tr>
-                      <tr>
-                        <td style="padding:6px 0;">
-                          <table cellpadding="0" cellspacing="0">
-                            <tr>
-                              <td style="padding-right:12px;font-size:18px;">🔗</td>
-                              <td style="font-size:15px;color:#1B2B4B;"><strong>Shareable links</strong> — send directly to clients</td>
-                            </tr>
-                          </table>
-                        </td>
-                      </tr>
-                      <tr>
-                        <td style="padding:6px 0;">
-                          <table cellpadding="0" cellspacing="0">
-                            <tr>
-                              <td style="padding-right:12px;font-size:18px;">⚡</td>
-                              <td style="font-size:15px;color:#1B2B4B;"><strong>90 seconds</strong> — from address to audio</td>
-                            </tr>
-                          </table>
+                        <td width="50%" valign="top" style="padding-left:8px;">
+                          <p style="margin:0 0 10px 0;font-size:14px;color:#D1FAE5;">✓ &nbsp;Neighborhood overview</p>
+                          <p style="margin:0 0 10px 0;font-size:14px;color:#D1FAE5;">✓ &nbsp;List-to-sale price ratio</p>
+                          <p style="margin:0;font-size:14px;color:#D1FAE5;">✓ &nbsp;Your branded outro</p>
                         </td>
                       </tr>
                     </table>
                   </td>
                 </tr>
               </table>
+            </td>
+          </tr>
 
-              <!-- CTA -->
-              <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:32px;">
+          <!-- BOTTOM CTA -->
+          <tr>
+            <td style="background-color:#ffffff;border-radius:0 0 24px 24px;padding:36px 48px 44px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.07);">
+              <p style="margin:0 0 20px 0;font-size:18px;font-weight:700;color:#111827;">Ready to impress your first client?</p>
+              <table cellpadding="0" cellspacing="0" role="presentation" style="margin:0 auto;">
                 <tr>
-                  <td align="center">
+                  <td style="border-radius:12px;background-color:#1A7A6E;">
                     <a href="https://mattarout.vercel.app/dashboard"
-                       style="display:inline-block;background-color:#1A7A6E;color:#ffffff;font-size:16px;font-weight:600;text-decoration:none;padding:16px 40px;border-radius:12px;letter-spacing:-0.2px;">
-                      Generate your first podcast →
+                       style="display:inline-block;padding:15px 40px;font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;letter-spacing:-0.2px;border-radius:12px;">
+                      Open my dashboard →
                     </a>
                   </td>
                 </tr>
               </table>
-
-              <!-- Tips -->
-              <table width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #F0EDE8;padding-top:28px;">
-                <tr>
-                  <td>
-                    <p style="margin:0 0 12px 0;font-size:14px;font-weight:600;color:#1B2B4B;">Quick tips to get started:</p>
-                    <p style="margin:0 0 8px 0;font-size:14px;color:#6B7280;line-height:1.5;">
-                      <strong style="color:#1B2B4B;">1.</strong> Type any US property address — Google autocomplete kicks in fast.
-                    </p>
-                    <p style="margin:0 0 8px 0;font-size:14px;color:#6B7280;line-height:1.5;">
-                      <strong style="color:#1B2B4B;">2.</strong> Add your brokerage name under "Personalize" — it plays in the outro.
-                    </p>
-                    <p style="margin:0;font-size:14px;color:#6B7280;line-height:1.5;">
-                      <strong style="color:#1B2B4B;">3.</strong> Share the link — clients can listen without downloading anything.
-                    </p>
-                  </td>
-                </tr>
-              </table>
-
             </td>
           </tr>
 
-          <!-- Footer -->
+          <!-- FOOTER -->
           <tr>
-            <td align="center" style="padding-top:28px;">
-              <p style="margin:0;font-size:13px;color:#9CA3AF;line-height:1.6;">
-                You're receiving this because you signed up at <a href="https://mattarout.vercel.app" style="color:#1A7A6E;text-decoration:none;">HomeVoice</a>.<br/>
-                Questions? Reply to this email — I read every one.
+            <td align="center" style="padding-top:32px;padding-bottom:8px;">
+              <p style="margin:0 0 6px 0;font-size:13px;color:#9CA3AF;line-height:1.7;">
+                You're receiving this because you signed up at
+                <a href="https://mattarout.vercel.app" style="color:#1A7A6E;text-decoration:none;">HomeVoice</a>.
+              </p>
+              <p style="margin:0;font-size:13px;color:#9CA3AF;line-height:1.7;">
+                Questions or feedback? Reply directly — Matt reads every one.
               </p>
             </td>
           </tr>
