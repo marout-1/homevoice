@@ -1,7 +1,7 @@
 /**
  * app/api/podcast/ingest-url/route.ts
- * Fetches a URL server-side, strips nav/ads via Readability, and returns
- * a preview excerpt + a storage key for generate-custom.
+ * Fetches a URL server-side, strips nav/ads with node-html-parser (pure JS,
+ * no native deps), and returns a preview excerpt + storage key for generate-custom.
  *
  * POST { url: string }
  * Returns { previewExcerpt, previewExpanded, fullTextKey, wordCount, sourceLabel, pageTitle }
@@ -9,15 +9,46 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/app/lib/supabase/server";
-import { JSDOM } from "jsdom";
-import { Readability } from "@mozilla/readability";
+import { parse as parseHTML } from "node-html-parser";
 
 export const maxDuration = 20;
 
-const BOILERPLATE_SKIP = 600;
+const BOILERPLATE_SKIP = 300;
 const PREVIEW_LENGTH   = 400;
 const MAX_CHARS        = 50_000;
 const FETCH_TIMEOUT_MS = 10_000;
+
+function extractText(html: string, url: string): { text: string; title: string } {
+  const root = parseHTML(html, { blockTextElements: { script: false, style: false } });
+
+  // Grab title before stripping
+  const title =
+    root.querySelector("meta[property='og:title']")?.getAttribute("content") ||
+    root.querySelector("title")?.text ||
+    new URL(url).hostname;
+
+  // Remove noise elements
+  for (const tag of ["script", "style", "nav", "footer", "header", "aside",
+                      "noscript", "form", "button", "iframe", "figure", "figcaption"]) {
+    root.querySelectorAll(tag).forEach((el) => el.remove());
+  }
+  // Remove hidden elements (common ad containers)
+  root.querySelectorAll("[aria-hidden='true']").forEach((el) => el.remove());
+
+  // Prefer article/main content
+  const contentEl =
+    root.querySelector("article") ||
+    root.querySelector("main") ||
+    root.querySelector('[role="main"]') ||
+    root.querySelector(".article-body") ||
+    root.querySelector(".post-content") ||
+    root.querySelector(".entry-content") ||
+    root;
+
+  const raw = contentEl.structuredText ?? contentEl.text ?? "";
+
+  return { text: raw, title: title.trim() };
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -36,7 +67,6 @@ export async function POST(req: NextRequest) {
 
     // Fetch with timeout
     let html: string;
-    let pageTitle = "";
 
     try {
       const controller = new AbortController();
@@ -80,25 +110,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Parse with Readability
-    const dom = new JSDOM(html, { url });
-    const reader = new Readability(dom.window.document);
-    const article = reader.parse();
+    // Parse with node-html-parser (pure JS — works in all serverless envs)
+    const { text: rawText, title: pageTitle } = extractText(html, url);
 
-    if (!article || !article.textContent) {
-      return NextResponse.json(
-        {
-          error:
-            "We couldn't extract content from that page. Try pasting the text directly.",
-          fallback: true,
-        },
-        { status: 422 }
-      );
-    }
-
-    pageTitle = article.title || new URL(url).hostname;
-
-    let fullText = article.textContent
+    let fullText = rawText
       .replace(/\r\n/g, "\n")
       .replace(/\r/g, "\n")
       .replace(/[ \t]+/g, " ")
@@ -133,12 +148,20 @@ export async function POST(req: NextRequest) {
     // Store full text
     const supabase = createServiceClient();
     const key = `extracts/${Date.now()}-${Math.random().toString(36).slice(2)}.txt`;
-    await supabase.storage
+    const { error: uploadError } = await supabase.storage
       .from("homevoice-uploads")
       .upload(key, Buffer.from(fullText, "utf-8"), {
         contentType: "text/plain",
         upsert: false,
       });
+
+    if (uploadError) {
+      console.error("[ingest-url] storage upload error:", uploadError);
+      return NextResponse.json(
+        { error: "Storage error. Please try again.", fallback: true },
+        { status: 500 }
+      );
+    }
 
     const domain = new URL(url).hostname.replace(/^www\./, "");
 
@@ -154,7 +177,7 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     console.error("[ingest-url] error:", err);
     return NextResponse.json(
-      { error: "Something went wrong. Please try again." },
+      { error: "Something went wrong. Please try again.", fallback: true },
       { status: 500 }
     );
   }

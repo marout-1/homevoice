@@ -6,7 +6,11 @@
  * POST (multipart/form-data)
  *   file — the uploaded file
  *
- * Returns { previewExcerpt, fullTextKey, wordCount, sourceLabel }
+ * Returns { previewExcerpt, previewExpanded, fullTextKey, wordCount, sourceLabel }
+ *
+ * NOTE: We import pdf-parse from its internal lib path (lib/pdf-parse.js) to
+ * avoid the debug-mode bug in index.js where `!module.parent` is true in ESM
+ * serverless environments, causing it to try to read a test PDF and crash.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -14,7 +18,7 @@ import { createServiceClient } from "@/app/lib/supabase/server";
 
 export const maxDuration = 30;
 
-// How many chars to skip at the start (covers page, headers, boilerplate)
+// How many chars to skip at the start (covers page headers, boilerplate)
 const BOILERPLATE_SKIP = 600;
 const PREVIEW_LENGTH   = 400;
 const MAX_CHARS        = 50_000;
@@ -59,9 +63,13 @@ export async function POST(req: NextRequest) {
     let fullText = "";
 
     if (fileType === "pdf") {
-      // pdf-parse is CJS — require it to avoid ESM/CJS mismatch
+      // Use lib/pdf-parse.js directly to avoid the module.parent debug-mode
+      // bug in index.js that fires in ESM/serverless and tries to read a test file.
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const pdfParse = require("pdf-parse") as (buf: Buffer) => Promise<{ text: string }>;
+      const pdfParse = require("pdf-parse/lib/pdf-parse.js") as (
+        buf: Buffer,
+        options?: Record<string, unknown>
+      ) => Promise<{ text: string }>;
       const result = await pdfParse(buffer);
       fullText = result.text;
     } else if (fileType === "docx") {
@@ -103,15 +111,23 @@ export async function POST(req: NextRequest) {
       .replace(/\n+/g, " ")
       .trim();
 
-    // Store full text in Supabase Storage (30-day expiry bucket)
+    // Store full text in Supabase Storage
     const supabase = createServiceClient();
     const key = `extracts/${Date.now()}-${Math.random().toString(36).slice(2)}.txt`;
-    await supabase.storage
+    const { error: uploadError } = await supabase.storage
       .from("homevoice-uploads")
       .upload(key, Buffer.from(fullText, "utf-8"), {
         contentType: "text/plain",
         upsert: false,
       });
+
+    if (uploadError) {
+      console.error("[ingest-file] storage upload error:", uploadError);
+      return NextResponse.json(
+        { error: "Storage error. Please try again." },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       previewExcerpt,

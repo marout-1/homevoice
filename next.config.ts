@@ -8,6 +8,9 @@ const nextConfig: NextConfig = {
       bodySizeLimit: "10mb", // audio responses can be several MB
     },
   },
+  // Keep heavy CJS native modules out of the webpack bundle so they load
+  // correctly in Vercel serverless functions (Node.js runtime, not Edge).
+  serverExternalPackages: ["pdf-parse", "mammoth", "canvas"],
 };
 
 export default nextConfig;
