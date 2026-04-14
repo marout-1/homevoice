@@ -66,7 +66,7 @@ export default function SignupPage() {
             <span className="font-bold text-gray-900 text-xl">HomeVoice</span>
           </Link>
           <h1 className="text-2xl font-bold text-gray-900">Create your account</h1>
-          <p className="text-gray-500 text-sm mt-1">3 free podcasts every month — no credit card needed</p>
+          <p className="text-gray-500 text-sm mt-1">10 free podcasts every month — no credit card needed</p>
         </div>
 
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">

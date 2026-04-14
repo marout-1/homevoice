@@ -1,8 +1,8 @@
-import { createClient } from "@/app/lib/supabase/server";
+import { createServiceClient } from "@/app/lib/supabase/server";
 import AdminUsersClient from "./AdminUsersClient";
 
 export default async function AdminPage() {
-  const supabase = await createClient();
+  const supabase = createServiceClient();
 
   // Fetch all users for initial load
   const { data: profiles, count } = await supabase

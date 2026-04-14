@@ -1,10 +1,10 @@
-import { createClient } from "@/app/lib/supabase/server";
+import { createServiceClient } from "@/app/lib/supabase/server";
 import { notFound } from "next/navigation";
 import AdminUserDetailClient from "./AdminUserDetailClient";
 
 export default async function AdminUserDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const supabase = await createClient();
+  const supabase = createServiceClient();
 
   const { data: profile, error } = await supabase
     .from("profiles")

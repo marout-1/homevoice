@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/app/lib/supabase/server";
+import { createClient, createServiceClient } from "@/app/lib/supabase/server";
 
 export async function GET(req: NextRequest) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const authClient = await createClient();
+  const { data: { user } } = await authClient.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  const supabase = createServiceClient();
   const { data: adminProfile } = await supabase
     .from("profiles")
     .select("is_admin")
@@ -24,7 +25,6 @@ export async function GET(req: NextRequest) {
     .order("created_at", { ascending: false })
     .range(offset, offset + limit - 1);
 
-  // Enrich with emails from profiles
   const adminIds = [...new Set((events ?? []).map(e => e.admin_id))];
   const targetIds = [...new Set((events ?? []).map(e => e.target_user_id).filter(Boolean))];
   const allIds = [...new Set([...adminIds, ...targetIds])];

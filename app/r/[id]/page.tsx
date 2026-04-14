@@ -39,7 +39,25 @@ export async function generateMetadata({ params }: PageProps) {
   return {
     title,
     description,
-    openGraph: { title, description, type: "website" },
+    openGraph: {
+      title,
+      description,
+      type: "website",
+      images: [
+        {
+          url: "https://mattarout.vercel.app/og-share.png",
+          width: 1200,
+          height: 630,
+          alt: title,
+        },
+      ],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+      images: ["https://mattarout.vercel.app/og-share.png"],
+    },
   };
 }
 

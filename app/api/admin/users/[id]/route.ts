@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/app/lib/supabase/server";
+import { createClient, createServiceClient } from "@/app/lib/supabase/server";
 
-async function requireAdmin(supabase: Awaited<ReturnType<typeof createClient>>) {
-  const { data: { user } } = await supabase.auth.getUser();
+async function requireAdmin() {
+  const authClient = await createClient();
+  const { data: { user } } = await authClient.auth.getUser();
   if (!user) return null;
+  const supabase = createServiceClient();
   const { data: p } = await supabase.from("profiles").select("is_admin").eq("id", user.id).single();
   if (!p?.is_admin) return null;
   return user;
@@ -12,10 +14,10 @@ async function requireAdmin(supabase: Awaited<ReturnType<typeof createClient>>) 
 // GET /api/admin/users/[id]
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const supabase = await createClient();
-  const admin = await requireAdmin(supabase);
+  const admin = await requireAdmin();
   if (!admin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
+  const supabase = createServiceClient();
   const { data: profile, error } = await supabase
     .from("profiles")
     .select("*")
@@ -41,13 +43,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 }
 
 // PATCH /api/admin/users/[id]
-// body: { action: 'suspend' | 'unsuspend' | 'delete' | 'restore' | 'note' | 'plan', reason?, note?, plan? }
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const supabase = await createClient();
-  const admin = await requireAdmin(supabase);
+  const admin = await requireAdmin();
   if (!admin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
+  const supabase = createServiceClient();
   const body = await req.json();
   const { action } = body;
 
@@ -86,7 +87,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     .eq("id", id);
   if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 });
 
-  // Write audit event
   await supabase.from("audit_events").insert({
     admin_id: admin.id,
     target_user_id: id,

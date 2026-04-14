@@ -1,8 +1,8 @@
-import { createClient } from "@/app/lib/supabase/server";
+import { createServiceClient } from "@/app/lib/supabase/server";
 import AdminAuditClient from "./AdminAuditClient";
 
 export default async function AdminAuditPage() {
-  const supabase = await createClient();
+  const supabase = createServiceClient();
 
   const { data: events, count } = await supabase
     .from("audit_events")

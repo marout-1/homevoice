@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { createClient } from "@/app/lib/supabase/server";
+import { createClient, createServiceClient } from "@/app/lib/supabase/server";
 import Link from "next/link";
 
 export const metadata = { title: "Admin — HomeVoice" };
@@ -10,8 +10,9 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
   if (!user) redirect("/login");
 
-  // Check admin flag
-  const { data: profile } = await supabase
+  // Use service client to bypass RLS for admin check
+  const serviceClient = createServiceClient();
+  const { data: profile } = await serviceClient
     .from("profiles")
     .select("is_admin, email")
     .eq("id", user.id)
@@ -42,8 +43,14 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           </div>
           <div className="flex items-center gap-3">
             <span className="text-white/40 text-xs">{profile.email}</span>
-            <Link href="/dashboard" className="text-white/50 hover:text-white text-xs transition-colors">
-              ← Back to app
+            <Link
+              href="/dashboard"
+              className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border border-white/20 text-white/70 hover:text-white hover:border-white/50 transition-colors"
+            >
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+              </svg>
+              Back to app
             </Link>
           </div>
         </div>

@@ -37,7 +37,7 @@ export default async function DashboardPage() {
 
   return (
     <DashboardClient
-      user={{ id: user.id, email: user.email ?? "" }}
+      user={{ id: user.id, email: user.email ?? "", is_admin: profile?.is_admin ?? false }}
       profile={profile ?? { brand_name: "HomeVoice", plan: "free", podcasts_this_month: 0 }}
       podcasts={podcasts ?? []}
     />

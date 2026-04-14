@@ -9,13 +9,18 @@ export interface MarketContext {
   summary: string;       // 2–3 sentence summary for the podcast script
   articles: Article[];   // raw articles for transparency
   dataSource: string;
-  // Enriched market stats (populated from property comps + derived data)
+  // Enriched market stats (populated from property comps + ZipMarketData)
   stats?: {
     medianDaysOnMarket?: number;
-    priceChangePercent?: number;    // vs last year
+    priceChangePercent?: number;
     medianSalePrice?: number;
     inventoryLabel?: string;        // "low" | "balanced" | "high"
     marketTemperature?: string;     // "hot" | "warm" | "cool" | "cold"
+    activeListings?: number;
+    inventoryMonths?: number;
+    newListings?: number;
+    pendingSales?: number;
+    listToSaleRatio?: number;
   };
   recentSales?: RecentSale[];
 }
@@ -195,6 +200,48 @@ function enrichWithComps(
   };
 }
 
+// ─── ZipMarketData (ZIP-level market stats) ───────────────────────────────────
+
+async function fetchZipMarketData(zipCode: string): Promise<Partial<MarketContext["stats"]> | null> {
+  const apiKey = process.env.ZIPMARKETDATA_API_KEY;
+  if (!apiKey || !zipCode) return null;
+
+  try {
+    const res = await fetch(`https://api.zipmarketdata.com/v1/market-stats?zip=${zipCode}`, {
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!res.ok) {
+      console.warn("[market] ZipMarketData non-ok:", res.status);
+      return null;
+    }
+
+    const data = await res.json();
+    console.log("[market] ZipMarketData success for ZIP:", zipCode);
+
+    return {
+      medianSalePrice: data.median_sale_price ?? data.medianSalePrice ?? undefined,
+      medianDaysOnMarket: data.median_days_on_market ?? data.medianDaysOnMarket ?? undefined,
+      priceChangePercent: data.price_change_percent ?? data.priceChangePercent ?? undefined,
+      inventoryLabel: data.inventory_months != null
+        ? data.inventory_months < 3 ? "low" : data.inventory_months < 6 ? "balanced" : "high"
+        : undefined,
+      marketTemperature: data.market_temperature ?? undefined,
+      activeListings: data.active_listings ?? undefined,
+      inventoryMonths: data.inventory_months ?? undefined,
+      newListings: data.new_listings ?? undefined,
+      pendingSales: data.pending_sales ?? undefined,
+      listToSaleRatio: data.list_to_sale_ratio ?? undefined,
+    };
+  } catch (err) {
+    console.warn("[market] ZipMarketData error:", err);
+    return null;
+  }
+}
+
 // ─── Public entry point ────────────────────────────────────────────────────────
 
 export async function getMarketContext(
@@ -204,8 +251,34 @@ export async function getMarketContext(
   comps?: Array<{ address: string; soldPrice: number; soldDate: string; beds: number | null; baths: number | null; sqft: number | null }>,
   zestimate?: number | null
 ): Promise<MarketContext> {
-  const serper = await fetchSerperNews(city, state, zipCode);
+  // Fetch news and ZIP-level stats in parallel
+  const [serper, zipStats] = await Promise.all([
+    fetchSerperNews(city, state, zipCode),
+    fetchZipMarketData(zipCode),
+  ]);
+
   const base = serper ?? await fetchTavilyNews(city, state) ?? buildDemoMarket(city, state);
   if (!serper) console.warn("No market news API keys found — using demo market context");
-  return enrichWithComps(base, comps ?? [], zestimate ?? null);
+
+  // Enrich with comps first, then overlay ZipMarketData stats (more accurate)
+  const enriched = enrichWithComps(base, comps ?? [], zestimate ?? null);
+
+  if (zipStats) {
+    console.log("[market] Overlaying ZipMarketData stats");
+    return {
+      ...enriched,
+      stats: {
+        ...enriched.stats,
+        ...zipStats,
+        // ZipMarketData overrides derived stats where available
+        medianSalePrice: zipStats.medianSalePrice ?? enriched.stats?.medianSalePrice,
+        medianDaysOnMarket: zipStats.medianDaysOnMarket ?? enriched.stats?.medianDaysOnMarket,
+        priceChangePercent: zipStats.priceChangePercent ?? enriched.stats?.priceChangePercent,
+        inventoryLabel: zipStats.inventoryLabel ?? enriched.stats?.inventoryLabel,
+        marketTemperature: zipStats.marketTemperature ?? enriched.stats?.marketTemperature,
+      },
+    };
+  }
+
+  return enriched;
 }

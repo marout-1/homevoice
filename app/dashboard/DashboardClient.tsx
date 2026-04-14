@@ -327,7 +327,7 @@ function OnboardingModal({ onDismiss }: { onDismiss: () => void }) {
 
 // ─── Constants & helpers ──────────────────────────────────────────────────────
 
-const FREE_LIMIT = 100;
+const FREE_LIMIT = 10;
 
 interface Profile {
   brand_name: string;
@@ -346,7 +346,7 @@ interface Podcast {
 }
 
 interface Props {
-  user: { id: string; email: string };
+  user: { id: string; email: string; is_admin: boolean };
   profile: Profile;
   podcasts: Podcast[];
 }
@@ -411,8 +411,20 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
   // Onboarding modal
   const [showOnboarding, setShowOnboarding] = useState(false);
 
-  // History expanded item
+  // History expanded item + pagination
   const [expandedPodcastId, setExpandedPodcastId] = useState<string | null>(null);
+  const [historyLimit, setHistoryLimit] = useState(10);
+  const [loadingMoreHistory, setLoadingMoreHistory] = useState(false);
+
+  // Toast notification
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function showToast(message: string, type: "success" | "error" = "success") {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast({ message, type });
+    toastTimerRef.current = setTimeout(() => setToast(null), 3000);
+  }
 
   const supabase = createClient();
   const router = useRouter();
@@ -643,12 +655,31 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
   async function handleSaveProfile(e: React.FormEvent) {
     e.preventDefault();
     setSavingProfile(true);
-    await supabase.from("profiles").update({ brand_name: newBrandName }).eq("id", user.id);
+    const { error: saveErr } = await supabase.from("profiles").update({ brand_name: newBrandName }).eq("id", user.id);
     setProfile((p) => ({ ...p, brand_name: newBrandName }));
     setBrandName(newBrandName);
     setSavingProfile(false);
     setProfileSaved(true);
     setTimeout(() => setProfileSaved(false), 2000);
+    if (saveErr) {
+      showToast("Failed to save brand name. Please try again.", "error");
+    } else {
+      showToast("Brand name saved!");
+    }
+  }
+
+  async function handleLoadMoreHistory() {
+    setLoadingMoreHistory(true);
+    const newLimit = historyLimit + 10;
+    const { data: morePodcasts } = await supabase
+      .from("podcasts")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(newLimit);
+    if (morePodcasts) setPodcasts(morePodcasts);
+    setHistoryLimit(newLimit);
+    setLoadingMoreHistory(false);
   }
 
   async function handleSignOut() {
@@ -663,6 +694,26 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
 
   return (
     <>
+      {/* Toast notification */}
+      {toast && (
+        <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 px-5 py-3 rounded-2xl shadow-xl text-sm font-medium transition-all animate-in fade-in slide-in-from-bottom-3 ${
+          toast.type === "error"
+            ? "bg-red-600 text-white"
+            : "bg-[#1B2B4B] text-white"
+        }`}>
+          {toast.type === "success" ? (
+            <svg className="w-4 h-4 text-[#4ECAB4]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+            </svg>
+          ) : (
+            <svg className="w-4 h-4 text-red-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M12 5a7 7 0 100 14 7 7 0 000-14z" />
+            </svg>
+          )}
+          {toast.message}
+        </div>
+      )}
+
       {/* Onboarding modal */}
       {showOnboarding && <OnboardingModal onDismiss={dismissOnboarding} />}
 
@@ -689,6 +740,19 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
               {isPro ? "Pro · Unlimited" : `${usedThisMonth} / ${FREE_LIMIT} this month`}
             </div>
             <span className="text-sm text-[#1B2B4B]/40 hidden sm:block">{user.email}</span>
+            {/* Admin toggle — only shown to admin users */}
+            {user.is_admin && (
+              <Link
+                href="/admin"
+                className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full bg-[#1B2B4B] text-white hover:bg-[#1B2B4B]/80 transition-colors"
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                Admin
+              </Link>
+            )}
             <button
               onClick={handleSignOut}
               className="text-sm text-[#1B2B4B]/40 hover:text-[#1B2B4B] transition-colors"
@@ -893,43 +957,81 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
             {/* Progress */}
             {loading && (
               <div className="bg-white rounded-2xl border border-[#E8E4DC] shadow-sm p-8">
-                <h3 className="font-bold text-[#1B2B4B] text-center mb-6">Building your podcast…</h3>
-                <div className="space-y-4">
+                <h3 className="font-bold text-[#1B2B4B] text-center mb-2">Building your podcast…</h3>
+                <p className="text-center text-xs text-[#1B2B4B]/35 mb-6">
+                  {currentStep >= 0 && currentStep < STEPS.length ? STEPS[currentStep] : "Almost there…"}
+                </p>
+                {/* Real progress bar */}
+                <div className="mb-7">
+                  <div className="flex justify-between text-xs text-[#1B2B4B]/35 mb-1.5">
+                    <span>Progress</span>
+                    <span>{Math.round(Math.min((currentStep / STEPS.length) * 100, 95))}%</span>
+                  </div>
+                  <div className="h-2 bg-[#F5F3EF] rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-[#1A7A6E] rounded-full transition-all duration-700 ease-in-out"
+                      style={{ width: `${Math.min((currentStep / STEPS.length) * 100, 95)}%` }}
+                    />
+                  </div>
+                </div>
+                {/* Step list */}
+                <div className="space-y-3">
                   {STEPS.map((step, i) => {
                     const done = i < currentStep;
                     const active = i === currentStep;
                     return (
                       <div key={step} className="flex items-center gap-3">
-                        <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${done ? "bg-[#1A7A6E]" : active ? "bg-[#1B2B4B]" : "bg-[#F5F3EF]"}`}>
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 transition-all ${done ? "bg-[#1A7A6E]" : active ? "bg-[#1B2B4B]" : "bg-[#F5F3EF]"}`}>
                           {done ? (
-                            <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
                             </svg>
                           ) : active ? (
-                            <span className="w-3 h-3 rounded-full bg-white animate-pulse" />
+                            <span className="w-2.5 h-2.5 rounded-full bg-white animate-pulse" />
                           ) : (
-                            <span className="w-2 h-2 rounded-full bg-[#E8E4DC]" />
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#E8E4DC]" />
                           )}
                         </div>
-                        <span className={`text-sm font-medium ${done ? "text-[#1A7A6E]" : active ? "text-[#1B2B4B]" : "text-[#1B2B4B]/30"}`}>
+                        <span className={`text-sm font-medium transition-all ${done ? "text-[#1A7A6E]" : active ? "text-[#1B2B4B]" : "text-[#1B2B4B]/25"}`}>
                           {step}
                         </span>
                       </div>
                     );
                   })}
                 </div>
-                <p className="text-center text-xs text-[#1B2B4B]/30 mt-6">About 60–90 seconds ☕</p>
+                <p className="text-center text-xs text-[#1B2B4B]/25 mt-6">About 60–90 seconds ☕</p>
               </div>
             )}
 
             {/* Error */}
             {error && (
               <div className="bg-red-50 border border-red-100 rounded-2xl p-5">
-                <p className="font-semibold text-red-700 mb-1">Something went wrong</p>
-                <p className="text-red-600 text-sm">{error}</p>
-                <button onClick={() => { setError(null); setResult(null); }} className="mt-3 text-sm text-red-500 underline">
-                  Try again
-                </button>
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <svg className="w-4 h-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-semibold text-red-700 mb-1">Something went wrong</p>
+                    <p className="text-red-600 text-sm">{error}</p>
+                    <div className="flex items-center gap-3 mt-4">
+                      <button
+                        onClick={(e) => { setError(null); handleGenerate(e as unknown as React.FormEvent); }}
+                        disabled={!address.trim()}
+                        className="bg-red-600 hover:bg-red-700 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors disabled:opacity-50"
+                      >
+                        🔄 Retry
+                      </button>
+                      <button
+                        onClick={() => { setError(null); setResult(null); }}
+                        className="text-sm text-red-500 hover:text-red-700 transition-colors"
+                      >
+                        Edit address
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -1092,7 +1194,7 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
                   </h4>
                   {audioReady ? (
                     <>
-                      <div className="flex items-center gap-3 mb-3">
+                      <div className="flex items-center gap-3 mb-3 flex-wrap">
                         <button
                           onClick={audioPlaying ? handleStopTTS : handlePlayTTS}
                           className="flex items-center gap-2 bg-[#1A7A6E] hover:bg-[#15695F] text-white text-sm font-bold px-5 py-2.5 rounded-xl transition-colors"
@@ -1174,22 +1276,29 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
         {/* ── History tab ───────────────────────────────────────────────────── */}
         {activeTab === "history" && (
           <div>
-            <h2 className="font-bold text-[#1B2B4B] text-lg mb-5">Podcast History</h2>
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="font-bold text-[#1B2B4B] text-lg">Podcast History</h2>
+              {podcasts.length > 0 && (
+                <span className="text-xs text-[#1B2B4B]/35 bg-[#F5F3EF] px-3 py-1.5 rounded-full border border-[#E8E4DC]">
+                  {podcasts.length} podcast{podcasts.length !== 1 ? "s" : ""}
+                </span>
+              )}
+            </div>
             {podcasts.length === 0 ? (
               <div className="bg-white rounded-2xl border border-[#E8E4DC] shadow-sm p-12 text-center">
-                <p className="text-3xl mb-3">🎙️</p>
-                <p className="font-semibold text-[#1B2B4B] mb-1">No podcasts yet</p>
-                <p className="text-sm text-[#1B2B4B]/40">Generate your first podcast to see it here.</p>
+                <div className="w-16 h-16 bg-[#EDF4F3] rounded-2xl flex items-center justify-center mx-auto mb-4 text-3xl">🎙️</div>
+                <p className="font-semibold text-[#1B2B4B] mb-2">No podcasts yet</p>
+                <p className="text-sm text-[#1B2B4B]/40 mb-5">Your generated podcasts will appear here. Each one is saved automatically.</p>
                 <button
                   onClick={() => setActiveTab("generate")}
-                  className="mt-4 bg-[#1A7A6E] hover:bg-[#15695F] text-white text-sm font-semibold px-5 py-2.5 rounded-xl transition-colors"
+                  className="bg-[#1A7A6E] hover:bg-[#15695F] text-white text-sm font-semibold px-5 py-2.5 rounded-xl transition-colors"
                 >
-                  Generate now
+                  Generate your first podcast →
                 </button>
               </div>
             ) : (
               <div className="space-y-3">
-                {podcasts.map((pod) => {
+                {podcasts.slice(0, historyLimit).map((pod) => {
                   const isExpanded = expandedPodcastId === pod.id;
                   return (
                     <div key={pod.id} className="bg-white rounded-2xl border border-[#E8E4DC] shadow-sm overflow-hidden">
@@ -1263,6 +1372,16 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
                     </div>
                   );
                 })}
+                {/* Load more */}
+                {podcasts.length >= historyLimit && (
+                  <button
+                    onClick={handleLoadMoreHistory}
+                    disabled={loadingMoreHistory}
+                    className="w-full py-3 text-sm font-medium text-[#1A7A6E] hover:text-[#15695F] border border-dashed border-[#1A7A6E]/30 hover:border-[#1A7A6E]/60 rounded-2xl transition-all disabled:opacity-50"
+                  >
+                    {loadingMoreHistory ? "Loading…" : "Load more podcasts"}
+                  </button>
+                )}
               </div>
             )}
           </div>

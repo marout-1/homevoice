@@ -1,13 +1,15 @@
 /**
  * lib/script.ts
- * Generates podcast scripts via Claude Haiku.
+ * Generates podcast scripts via Claude Sonnet 4.5.
  * Supports agent personalization (tone, format, custom context),
  * richer market data (comps, price trends, market temperature),
- * and multiple podcast formats.
+ * multiple podcast formats, and a news pre-synthesis pass for richer Trends content.
  */
 
 import type { PropertyData } from "./property";
 import type { MarketContext } from "./market";
+import type { MortgageRates } from "./mortgage";
+import { calcMonthlyPayment } from "./mortgage";
 
 export interface PodcastScript {
   fullText: string;
@@ -44,32 +46,32 @@ const FORMAT_STRUCTURES: Record<string, { label: string; sectionInstructions: st
   "market-compass": {
     label: "Market Compass",
     sectionInstructions: `
-HOOK: Open with a compelling market insight or surprising data point about this neighborhood — something that makes the listener lean in. 2-3 sentences.
-OVERVIEW: Paint a clear picture of this specific property — what it is, what makes it interesting, what the numbers say. 2-4 sentences.
-COMPS: Dig into 2-3 comparable recent sales nearby. Be specific — give actual prices, dates, how this property stacks up. Make it feel like insider knowledge. 3-5 sentences.
-TRENDS: What's happening in this market RIGHT NOW? Price direction, days on market, inventory, buyer demand. Ground it in the data you have. 2-4 sentences.
-OUTLOOK: Where is this market heading? What does the data suggest for buyers, sellers, or investors watching this area? Be thoughtful, not overly bullish. 2-3 sentences.
-OUTRO: Warm sign-off. Mention the brand. Include the disclaimer naturally. 2 sentences.`,
+HOOK: Open with a compelling market insight or surprising data point about this neighborhood — something that makes the listener lean in. Target 40-60 words.
+OVERVIEW: Paint a clear picture of this specific property — what it is, what makes it interesting, what the numbers say. Target 80-100 words.
+COMPS: Dig into 2-3 comparable recent sales nearby. Be specific — give actual prices, dates, how this property stacks up. Make it feel like insider knowledge. Target 100-120 words.
+TRENDS: What's happening in this market RIGHT NOW? Draw from the synthesised market themes. Price direction, inventory, buyer demand. Ground it in real data. Target 100-120 words.
+OUTLOOK: Where is this market heading? What does the data suggest for buyers, sellers, or investors watching this area? Be thoughtful, not overly bullish. Target 80-100 words.
+OUTRO: Warm sign-off. Mention the brand. Include the disclaimer naturally. Target 40-60 words.`,
   },
   "buyers-brief": {
     label: "Buyer's Brief",
     sectionInstructions: `
-HOOK: Speak directly to a buyer considering this home. What's the one thing they need to know right now? 2 sentences.
-OVERVIEW: Walk through the property from a buyer's perspective — key features, value, what they're actually getting. 2-4 sentences.
-COMPS: How does this compare to what else sold nearby? Is this priced right? Give real examples. 3-4 sentences.
-TRENDS: Is now a good time to buy in this market? Inventory, competition, rate environment. 2-3 sentences.
-OUTLOOK: Should they move fast or do they have time? What's the risk of waiting? 2 sentences.
-OUTRO: Warm close with brand and disclaimer. 2 sentences.`,
+HOOK: Speak directly to a buyer considering this home. What's the one thing they need to know right now? Target 40-60 words.
+OVERVIEW: Walk through the property from a buyer's perspective — key features, value, what they're actually getting. Target 80-100 words.
+COMPS: How does this compare to what else sold nearby? Is this priced right? Give real examples. Target 100-120 words.
+TRENDS: Is now a good time to buy in this market? Draw from the synthesised market themes. Inventory, competition. Target 100-120 words.
+OUTLOOK: Should they move fast or do they have time? What's the risk of waiting? Target 80-100 words.
+OUTRO: Warm close with brand and disclaimer. Target 40-60 words.`,
   },
   "sellers-advantage": {
     label: "Seller's Advantage",
     sectionInstructions: `
-HOOK: Open with something that makes a seller feel good about their timing or position. 2 sentences.
-OVERVIEW: Frame the property as a seller would — what it offers, what buyers are looking for, why it has appeal. 2-4 sentences.
-COMPS: What did neighbors sell for? Set the seller's expectations with real data. 3-4 sentences.
-TRENDS: What's working in sellers' favor right now? What challenges exist? Be honest. 2-3 sentences.
-OUTLOOK: When and how should they list for best results? Strategic framing. 2 sentences.
-OUTRO: Supportive close with brand and disclaimer. 2 sentences.`,
+HOOK: Open with something that makes a seller feel good about their timing or position. Target 40-60 words.
+OVERVIEW: Frame the property as a seller would — what it offers, what buyers are looking for, why it has appeal. Target 80-100 words.
+COMPS: What did neighbors sell for? Set the seller's expectations with real data. Target 100-120 words.
+TRENDS: What's working in sellers' favor right now? Draw from the synthesised market themes. Target 100-120 words.
+OUTLOOK: When and how should they list for best results? Strategic framing. Target 80-100 words.
+OUTRO: Supportive close with brand and disclaimer. Target 40-60 words.`,
   },
 };
 
@@ -99,11 +101,54 @@ function spokenCurrency(n: number | null): string {
   return formatCurrency(n);
 }
 
+// ─── News pre-synthesis ───────────────────────────────────────────────────────
+// Converts raw article snippets into 3 clear market themes before the main prompt.
+// This dramatically improves the Trends section quality.
+
+async function synthesiseMarketNews(
+  rawSummary: string,
+  city: string,
+  state: string,
+  apiKey: string
+): Promise<string> {
+  if (!rawSummary || rawSummary.length < 50) return rawSummary;
+
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5",
+        max_tokens: 300,
+        system: "You are a real estate market analyst. Distill news snippets into exactly 3 concise market themes. Each theme is one sentence. Be specific and factual. No fluff.",
+        messages: [{
+          role: "user",
+          content: `Distill these ${city}, ${state} real estate news snippets into exactly 3 key market themes (one sentence each):\n\n${rawSummary}\n\nFormat:\nTheme 1: [sentence]\nTheme 2: [sentence]\nTheme 3: [sentence]`,
+        }],
+      }),
+    });
+
+    if (!res.ok) return rawSummary;
+    const data = await res.json();
+    const themes = data.content?.[0]?.text ?? rawSummary;
+    console.log("[script] News pre-synthesis complete:", themes.slice(0, 100));
+    return themes;
+  } catch {
+    return rawSummary;
+  }
+}
+
 // ─── Build rich context block for Claude ─────────────────────────────────────
 
 function buildContextBlock(
   property: PropertyData,
   market: MarketContext,
+  synthesisedNews: string,
+  mortgageRates: MortgageRates | null,
   brandName: string,
   agentContext: string
 ) {
@@ -145,15 +190,29 @@ function buildContextBlock(
     marketStats: {
       temperature: market.stats?.marketTemperature ?? "unknown",
       inventory: market.stats?.inventoryLabel ?? "unknown",
-      priceChangeSinceLastSales: market.stats?.priceChangePercent != null
-        ? `${market.stats.priceChangePercent > 0 ? "+" : ""}${market.stats.priceChangePercent}% vs recent comps`
+      priceChangePercent: market.stats?.priceChangePercent != null
+        ? `${market.stats.priceChangePercent > 0 ? "+" : ""}${market.stats.priceChangePercent}%`
         : null,
-      medianAreaSalePrice: market.stats?.medianSalePrice
+      medianSalePrice: market.stats?.medianSalePrice
         ? spokenCurrency(market.stats.medianSalePrice)
         : null,
+      medianDaysOnMarket: market.stats?.medianDaysOnMarket ?? null,
+      activeListings: market.stats?.activeListings ?? null,
+      inventoryMonths: market.stats?.inventoryMonths ?? null,
+      listToSaleRatio: market.stats?.listToSaleRatio
+        ? `${(market.stats.listToSaleRatio * 100).toFixed(1)}%`
+        : null,
     },
+    mortgageContext: mortgageRates?.rate30yr ? {
+      rate30yr: `${mortgageRates.rate30yr}%`,
+      rate15yr: mortgageRates.rate15yr ? `${mortgageRates.rate15yr}%` : null,
+      weekEnding: mortgageRates.weekEnding,
+      estimatedMonthlyPayment: calcMonthlyPayment(property.zestimate, mortgageRates.rate30yr)
+        ? `$${calcMonthlyPayment(property.zestimate, mortgageRates.rate30yr)?.toLocaleString()}/mo (20% down, 30yr fixed)`
+        : null,
+    } : null,
     recentComparableSales: recentSalesBlock,
-    marketNews: market.summary,
+    marketThemes: synthesisedNews,
     brandName,
     agentPersonalContext: agentContext || null,
   };
@@ -164,6 +223,7 @@ function buildContextBlock(
 export async function generatePodcastScript(
   property: PropertyData,
   market: MarketContext,
+  mortgageRates: MortgageRates | null,
   brandName: string,
   agentContext = "",
   tone = "friendly",
@@ -178,7 +238,16 @@ export async function generatePodcastScript(
 
   const toneProfile = TONE_PROFILES[tone] ?? TONE_PROFILES.friendly;
   const formatStructure = FORMAT_STRUCTURES[format] ?? FORMAT_STRUCTURES["market-compass"];
-  const contextBlock = buildContextBlock(property, market, brandName, agentContext);
+
+  // Pre-synthesise news into 3 market themes for a richer Trends section
+  const synthesisedNews = await synthesiseMarketNews(
+    market.summary,
+    property.city ?? "",
+    property.state ?? "",
+    apiKey
+  );
+
+  const contextBlock = buildContextBlock(property, market, synthesisedNews, mortgageRates, brandName, agentContext);
 
   const systemPrompt = `You are a real estate podcast host generating a spoken-word audio script. Style: ${toneProfile.instruction}
 
@@ -192,6 +261,10 @@ CRITICAL rules for natural audio:
 - NO bullet points, NO lists, NO formal language, NO semicolons
 - Commas and em-dashes for natural pauses
 - Never say "furthermore", "moreover", "in conclusion", "it is worth noting", "it should be noted"
+- Respect the target word counts per section — don't under-write
+- If mortgageContext is provided, use it in the OUTLOOK or TRENDS section to ground affordability ("at today's rate of X%, monthly payments on this home run about $Y")
+- If medianDaysOnMarket is provided, use it in TRENDS ("homes here are selling in about X days on average")
+- If listToSaleRatio is provided and above 99%, mention it signals a competitive market
 ${agentContext ? `\nAgent personal context to weave in naturally: "${agentContext}"` : ""}`;
 
   const userPrompt = `Property and market data:
@@ -202,7 +275,7 @@ Write a ${formatStructure.label} podcast script. Use exactly these six labeled s
 
 ${formatStructure.sectionInstructions}
 
-Each section should be 2-5 natural spoken sentences. Cite specific numbers from the data. Make the COMPS section feel like genuine insider knowledge — mention actual prices and dates. The OUTRO must include "This is for informational purposes only and is not financial or appraisal advice" woven in naturally, then sign off warmly with "${brandName}".`;
+Cite specific numbers from the data. Make the COMPS section feel like genuine insider knowledge — mention actual prices and dates. Draw from the marketThemes for the TRENDS section. The OUTRO must include "This is for informational purposes only and is not financial or appraisal advice" woven in naturally, then sign off warmly with "${brandName}".`;
 
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -213,8 +286,8 @@ Each section should be 2-5 natural spoken sentences. Cite specific numbers from 
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-haiku-4-5",
-        max_tokens: 1500,
+        model: "claude-sonnet-4-5",
+        max_tokens: 2500,
         system: systemPrompt,
         messages: [{ role: "user", content: userPrompt }],
       }),
