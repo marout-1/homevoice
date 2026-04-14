@@ -318,6 +318,507 @@ function OnboardingModal({ onDismiss }: { onDismiss: () => void }) {
   );
 }
 
+// ─── Custom Content Tab ───────────────────────────────────────────────────────
+
+type CustomStep = "idle" | "reading" | "preview" | "generating" | "done" | "paywalled";
+
+interface IngestResult {
+  previewExcerpt: string;
+  previewExpanded: string;
+  fullTextKey: string;
+  wordCount: number;
+  sourceLabel: string;
+  sourceType: string;
+  pageTitle?: string;
+}
+
+function CustomContentTab({
+  userId,
+  brandName,
+  isPro,
+  onPodcastCreated,
+  showToast,
+}: {
+  userId: string;
+  brandName: string;
+  isPro: boolean;
+  onPodcastCreated: (pod: Podcast) => void;
+  showToast: (msg: string, type?: "success" | "error") => void;
+}) {
+  const [step, setStep] = useState<CustomStep>("idle");
+  const [url, setUrl] = useState("");
+  const [pasteText, setPasteText] = useState("");
+  const [showPasteFallback, setShowPasteFallback] = useState(false);
+  const [fallbackError, setFallbackError] = useState<string | null>(null);
+  const [ingestResult, setIngestResult] = useState<IngestResult | null>(null);
+  const [previewExpanded, setPreviewExpanded] = useState(false);
+  const [genStep, setGenStep] = useState(0);
+  const [audioBase64, setAudioBase64] = useState<string | null>(null);
+  const [scriptText, setScriptText] = useState<string | null>(null);
+  const [podcastId, setPodcastId] = useState<string | null>(null);
+  const [shareCopied, setShareCopied] = useState(false);
+  const [audioPlaying, setAudioPlaying] = useState(false);
+  const [audioEl, setAudioEl] = useState<HTMLAudioElement | null>(null);
+  const dropRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const GEN_STEPS = ["Reading your content", "Crafting your script", "Recording audio"];
+
+  async function ingestFile(file: File) {
+    setStep("reading");
+    setFallbackError(null);
+    const form = new FormData();
+    form.append("file", file);
+
+    const timer = setTimeout(() => {
+      setStep("idle");
+      setFallbackError("That file took too long to read. Please try again.");
+    }, 20000);
+
+    try {
+      const res = await fetch("/api/podcast/ingest-file", { method: "POST", body: form });
+      clearTimeout(timer);
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        setStep("idle");
+        setFallbackError(data.error || "Could not read that file.");
+        return;
+      }
+      setIngestResult(data);
+      setStep("preview");
+    } catch {
+      clearTimeout(timer);
+      setStep("idle");
+      setFallbackError("Network error reading file. Please try again.");
+    }
+  }
+
+  async function ingestUrl() {
+    if (!url.startsWith("https://")) {
+      setFallbackError("Please enter a URL starting with https://");
+      return;
+    }
+    setStep("reading");
+    setFallbackError(null);
+    try {
+      const res = await fetch("/api/podcast/ingest-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        setStep("idle");
+        setFallbackError(data.error || "Could not fetch that page.");
+        setShowPasteFallback(true);
+        return;
+      }
+      setIngestResult(data);
+      setStep("preview");
+    } catch {
+      setStep("idle");
+      setFallbackError("Network error. Please try again.");
+      setShowPasteFallback(true);
+    }
+  }
+
+  async function ingestPastedText() {
+    if (pasteText.trim().split(/\s+/).length < 50) {
+      setFallbackError("Please paste at least 50 words of content.");
+      return;
+    }
+    setStep("reading");
+    setFallbackError(null);
+    try {
+      const res = await fetch("/api/podcast/ingest-text", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: pasteText }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        setStep("idle");
+        setFallbackError(data.error || "Could not process that text.");
+        return;
+      }
+      setIngestResult(data);
+      setStep("preview");
+    } catch {
+      setStep("idle");
+      setFallbackError("Network error. Please try again.");
+    }
+  }
+
+  async function handleGenerate() {
+    if (!ingestResult) return;
+    setStep("generating");
+    setGenStep(0);
+
+    const t1 = setTimeout(() => setGenStep(1), 5000);
+    const t2 = setTimeout(() => setGenStep(2), 12000);
+
+    try {
+      const res = await fetch("/api/podcast/generate-custom", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fullTextKey: ingestResult.fullTextKey,
+          userId,
+          brandName,
+          sourceLabel: ingestResult.sourceLabel,
+          sourceType: ingestResult.sourceType,
+        }),
+      });
+      clearTimeout(t1); clearTimeout(t2);
+      const data = await res.json();
+
+      if (data.paywalled) {
+        setStep("paywalled");
+        return;
+      }
+      if (!res.ok || data.error) {
+        setStep("preview");
+        showToast(data.error || "Generation failed. Please try again.", "error");
+        return;
+      }
+
+      setScriptText(data.script);
+      setPodcastId(data.podcastId);
+      setGenStep(3);
+
+      if (data.audioBase64) {
+        const blob = new Blob(
+          [Uint8Array.from(atob(data.audioBase64), (c) => c.charCodeAt(0))],
+          { type: "audio/mpeg" }
+        );
+        const blobUrl = URL.createObjectURL(blob);
+        const el = new Audio(blobUrl);
+        el.onended = () => setAudioPlaying(false);
+        setAudioEl(el);
+        setAudioBase64(data.audioBase64);
+      }
+
+      setStep("done");
+      onPodcastCreated({
+        id: data.podcastId,
+        address: ingestResult.sourceLabel,
+        city: null as unknown as string,
+        state: null as unknown as string,
+        zestimate: null,
+        script_text: data.script,
+        created_at: new Date().toISOString(),
+      });
+    } catch {
+      clearTimeout(t1); clearTimeout(t2);
+      setStep("preview");
+      showToast("Network error. Please try again.", "error");
+    }
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file) ingestFile(file);
+  }
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) ingestFile(file);
+  }
+
+  function handlePlayPause() {
+    if (!audioEl) return;
+    if (audioPlaying) {
+      audioEl.pause();
+      setAudioPlaying(false);
+    } else {
+      audioEl.play().then(() => setAudioPlaying(true)).catch(() => {});
+    }
+  }
+
+  function handleCopyShare() {
+    if (!podcastId) return;
+    const shareUrl = `${window.location.origin}/r/${podcastId}`;
+    navigator.clipboard.writeText(shareUrl).then(() => {
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 2500);
+    });
+  }
+
+  function handleReset() {
+    setStep("idle");
+    setUrl("");
+    setPasteText("");
+    setShowPasteFallback(false);
+    setFallbackError(null);
+    setIngestResult(null);
+    setPreviewExpanded(false);
+    setScriptText(null);
+    setPodcastId(null);
+    setAudioBase64(null);
+    setAudioEl(null);
+    setAudioPlaying(false);
+    setGenStep(0);
+  }
+
+  return (
+    <div className="max-w-2xl space-y-5">
+      {/* Header */}
+      <div>
+        <h2 className="font-bold text-[#1B2B4B] text-xl">Custom Content Podcast</h2>
+        <p className="text-sm text-[#1B2B4B]/50 mt-1">
+          Turn any document or article into a branded podcast — upload a file or paste a URL.
+        </p>
+        {!isPro && (
+          <div className="mt-3 bg-[#EDF4F3] border border-[#1A7A6E]/20 rounded-xl px-4 py-3 text-sm text-[#1A7A6E] font-medium">
+            🎁 Your first custom podcast is free — no credit card needed.
+          </div>
+        )}
+      </div>
+
+      {/* ── IDLE: input area ── */}
+      {step === "idle" && (
+        <div className="space-y-4">
+          {/* Drop zone */}
+          <div
+            ref={dropRef}
+            onDrop={handleDrop}
+            onDragOver={(e) => e.preventDefault()}
+            onClick={() => fileInputRef.current?.click()}
+            className="bg-white border-2 border-dashed border-[#E8E4DC] hover:border-[#1A7A6E]/40 rounded-2xl p-10 text-center cursor-pointer transition-colors group"
+          >
+            <div className="w-14 h-14 bg-[#EDF4F3] rounded-xl flex items-center justify-center mx-auto mb-4 text-2xl group-hover:bg-[#1A7A6E]/10 transition-colors">
+              📄
+            </div>
+            <p className="font-semibold text-[#1B2B4B] mb-1">Drop a file or click to browse</p>
+            <p className="text-sm text-[#1B2B4B]/40">PDF, DOCX, or TXT · Max 10MB</p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,.docx,.txt,.md"
+              className="hidden"
+              onChange={handleFileChange}
+            />
+          </div>
+
+          {/* URL input */}
+          <div className="bg-white border border-[#E8E4DC] rounded-2xl p-5">
+            <p className="text-sm font-semibold text-[#1B2B4B] mb-3">Or paste a URL</p>
+            <div className="flex gap-2">
+              <input
+                type="url"
+                value={url}
+                onChange={(e) => { setUrl(e.target.value); setFallbackError(null); setShowPasteFallback(false); }}
+                placeholder="https://your-newsletter.com/article"
+                className="flex-1 border border-[#E8E4DC] rounded-xl px-4 py-2.5 text-sm text-[#1B2B4B] focus:outline-none focus:ring-2 focus:ring-[#1A7A6E] focus:border-transparent placeholder-[#1B2B4B]/30"
+              />
+              <button
+                onClick={ingestUrl}
+                disabled={!url}
+                className="bg-[#1A7A6E] hover:bg-[#15695F] disabled:bg-[#1A7A6E]/30 text-white text-sm font-semibold px-5 py-2.5 rounded-xl transition-colors whitespace-nowrap"
+              >
+                Fetch →
+              </button>
+            </div>
+          </div>
+
+          {/* Error + paste fallback */}
+          {fallbackError && (
+            <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+              <p className="text-sm text-red-700 font-medium">{fallbackError}</p>
+              {showPasteFallback && (
+                <p className="text-sm text-red-600 mt-1">Paste your content below instead:</p>
+              )}
+            </div>
+          )}
+
+          {showPasteFallback && (
+            <div className="bg-white border border-[#E8E4DC] rounded-2xl p-5">
+              <p className="text-sm font-semibold text-[#1B2B4B] mb-3">Paste your content here →</p>
+              <textarea
+                value={pasteText}
+                onChange={(e) => setPasteText(e.target.value)}
+                placeholder="Paste the article or document text here…"
+                rows={7}
+                className="w-full border border-[#E8E4DC] rounded-xl px-4 py-3 text-sm text-[#1B2B4B] focus:outline-none focus:ring-2 focus:ring-[#1A7A6E] focus:border-transparent placeholder-[#1B2B4B]/30 resize-none"
+              />
+              <button
+                onClick={ingestPastedText}
+                disabled={pasteText.trim().split(/\s+/).length < 10}
+                className="mt-3 bg-[#1A7A6E] hover:bg-[#15695F] disabled:bg-[#1A7A6E]/30 text-white text-sm font-semibold px-5 py-2.5 rounded-xl transition-colors"
+              >
+                Use this content →
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── READING ── */}
+      {step === "reading" && (
+        <div className="bg-white border border-[#E8E4DC] rounded-2xl p-10 text-center">
+          <div className="w-12 h-12 border-4 border-[#1A7A6E] border-t-transparent rounded-full animate-spin mx-auto mb-5" />
+          <p className="font-semibold text-[#1B2B4B]">Reading your content…</p>
+          <p className="text-sm text-[#1B2B4B]/40 mt-1">This usually takes a few seconds.</p>
+        </div>
+      )}
+
+      {/* ── PREVIEW ── */}
+      {step === "preview" && ingestResult && (
+        <div className="space-y-4">
+          <div className="bg-white border border-[#E8E4DC] rounded-2xl p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <p className="text-xs text-[#1A7A6E] font-semibold uppercase tracking-wide mb-1">Content preview</p>
+                <p className="font-semibold text-[#1B2B4B]">{ingestResult.sourceLabel}</p>
+                <p className="text-xs text-[#1B2B4B]/40 mt-0.5">{ingestResult.wordCount.toLocaleString()} words extracted</p>
+              </div>
+              <button onClick={handleReset} className="text-sm text-[#1B2B4B]/30 hover:text-[#1B2B4B]/60 transition-colors">
+                Try a different file
+              </button>
+            </div>
+
+            <div className="bg-[#F9F8F6] rounded-xl p-4 text-sm text-[#1B2B4B]/70 leading-relaxed border border-[#E8E4DC]">
+              <p>
+                {previewExpanded ? ingestResult.previewExpanded : ingestResult.previewExcerpt}
+                {!previewExpanded && ingestResult.previewExpanded.length > ingestResult.previewExcerpt.length && (
+                  <button
+                    onClick={() => setPreviewExpanded(true)}
+                    className="ml-2 text-[#1A7A6E] font-medium hover:underline"
+                  >
+                    Preview more…
+                  </button>
+                )}
+              </p>
+            </div>
+
+            <p className="text-xs text-[#1B2B4B]/35 mt-3">
+              ✓ Content looks right? We&apos;ll use this to generate your podcast.
+            </p>
+          </div>
+
+          <button
+            onClick={handleGenerate}
+            className="w-full bg-[#1A7A6E] hover:bg-[#15695F] text-white font-bold py-4 rounded-2xl transition-colors text-base"
+          >
+            Looks good — generate podcast →
+          </button>
+        </div>
+      )}
+
+      {/* ── GENERATING ── */}
+      {step === "generating" && (
+        <div className="bg-white border border-[#E8E4DC] rounded-2xl p-10">
+          <p className="font-semibold text-[#1B2B4B] text-center mb-8">Creating your podcast…</p>
+          <div className="space-y-4">
+            {GEN_STEPS.map((label, i) => {
+              const done = genStep > i;
+              const active = genStep === i;
+              return (
+                <div key={i} className="flex items-center gap-4">
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-sm font-bold transition-all ${
+                    done ? "bg-[#1A7A6E] text-white" : active ? "bg-[#1A7A6E]/20 text-[#1A7A6E]" : "bg-[#F5F3EF] text-[#1B2B4B]/25"
+                  }`}>
+                    {done ? "✓" : i + 1}
+                  </div>
+                  <div className="flex-1">
+                    <p className={`text-sm font-medium transition-colors ${done ? "text-[#1A7A6E]" : active ? "text-[#1B2B4B]" : "text-[#1B2B4B]/30"}`}>
+                      {label}
+                    </p>
+                    {active && (
+                      <div className="mt-1.5 h-1 rounded-full bg-[#E8E4DC] overflow-hidden">
+                        <div className="h-full bg-[#1A7A6E] rounded-full animate-pulse w-2/3" />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── DONE ── */}
+      {step === "done" && (
+        <div className="space-y-4">
+          <div className="bg-white border border-[#E8E4DC] rounded-2xl p-6">
+            <div className="flex items-center gap-3 mb-5">
+              <div className="w-10 h-10 bg-[#EDF4F3] rounded-xl flex items-center justify-center text-xl">🎙️</div>
+              <div>
+                <p className="font-bold text-[#1B2B4B]">Your podcast is ready!</p>
+                <p className="text-xs text-[#1B2B4B]/40">{ingestResult?.sourceLabel}</p>
+              </div>
+            </div>
+
+            {/* Audio player */}
+            {audioEl && (
+              <div className="bg-[#F9F8F6] rounded-xl p-4 flex items-center gap-4 mb-4 border border-[#E8E4DC]">
+                <button
+                  onClick={handlePlayPause}
+                  className="w-10 h-10 bg-[#1A7A6E] rounded-full flex items-center justify-center text-white flex-shrink-0 hover:bg-[#15695F] transition-colors"
+                >
+                  {audioPlaying ? "⏸" : "▶"}
+                </button>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-[#1B2B4B] truncate">{ingestResult?.sourceLabel}</p>
+                  <p className="text-xs text-[#1B2B4B]/40">Custom content podcast · HomeVoice</p>
+                </div>
+              </div>
+            )}
+
+            {/* Share */}
+            {podcastId && (
+              <button
+                onClick={handleCopyShare}
+                className="w-full bg-[#1B2B4B] hover:bg-[#1B2B4B]/80 text-white font-semibold py-3 rounded-xl transition-colors text-sm flex items-center justify-center gap-2"
+              >
+                {shareCopied ? "✓ Link copied!" : "🔗 Copy shareable link"}
+              </button>
+            )}
+
+            {/* Script preview */}
+            {scriptText && (
+              <details className="mt-4">
+                <summary className="text-sm text-[#1B2B4B]/50 cursor-pointer hover:text-[#1B2B4B]/70 transition-colors">
+                  View script
+                </summary>
+                <div className="mt-3 bg-[#F9F8F6] rounded-xl p-4 text-sm text-[#1B2B4B]/70 leading-relaxed border border-[#E8E4DC] max-h-48 overflow-y-auto">
+                  {scriptText}
+                </div>
+              </details>
+            )}
+          </div>
+
+          <button
+            onClick={handleReset}
+            className="w-full border border-[#E8E4DC] hover:border-[#1A7A6E]/40 text-[#1B2B4B]/60 hover:text-[#1B2B4B] font-medium py-3 rounded-xl transition-colors text-sm"
+          >
+            Create another podcast
+          </button>
+        </div>
+      )}
+
+      {/* ── PAYWALLED ── */}
+      {step === "paywalled" && (
+        <div className="bg-[#1B2B4B] rounded-2xl p-8 text-center">
+          <div className="w-12 h-12 bg-white/10 rounded-xl flex items-center justify-center text-2xl mx-auto mb-4">🔒</div>
+          <h3 className="font-bold text-white text-lg mb-2">You&apos;ve used your 1 free custom podcast</h3>
+          <p className="text-white/50 text-sm mb-6">Upgrade to Pro for unlimited custom podcasts, plus unlimited address-based reports.</p>
+          <a
+            href="mailto:hello@homevoice.app?subject=Pro upgrade"
+            className="inline-block bg-[#1A7A6E] hover:bg-[#15695F] text-white font-bold px-8 py-3 rounded-xl transition-colors"
+          >
+            Upgrade to Pro →
+          </a>
+          <button onClick={handleReset} className="block w-full text-center text-sm text-white/25 hover:text-white/50 mt-4 transition-colors">
+            Go back
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Constants & helpers ──────────────────────────────────────────────────────
 
 const FREE_LIMIT = 10;
@@ -336,6 +837,8 @@ interface Podcast {
   zestimate: number | null;
   script_text: string | null;
   created_at: string;
+  source_type?: string;
+  source_label?: string;
 }
 
 interface Props {
@@ -368,7 +871,7 @@ function formatCurrency(n: number | null): string {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function DashboardClient({ user, profile: initialProfile, podcasts: initialPodcasts }: Props) {
-  const [activeTab, setActiveTab] = useState<"generate" | "history" | "profile">("generate");
+  const [activeTab, setActiveTab] = useState<"generate" | "custom" | "history" | "profile">("generate");
   const [profile, setProfile] = useState(initialProfile);
   const [podcasts, setPodcasts] = useState(initialPodcasts);
 
@@ -763,8 +1266,9 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
         <div className="flex gap-1 bg-[#F5F3EF] border border-[#E8E4DC] p-1 rounded-xl w-fit mb-8">
           {([
             { id: "generate", label: "🎙️ Generate" },
-            { id: "history", label: "📚 History" },
-            { id: "profile", label: "⚙️ Profile" },
+            { id: "custom",   label: "📄 Custom Content" },
+            { id: "history",  label: "📚 History" },
+            { id: "profile",  label: "⚙️ Profile" },
           ] as const).map((tab) => (
             <button
               key={tab.id}
@@ -1266,6 +1770,20 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
           </div>
         )}
 
+        {/* ── Custom Content tab ────────────────────────────────────────────── */}
+        {activeTab === "custom" && (
+          <CustomContentTab
+            userId={user.id}
+            brandName={brandName}
+            isPro={isPro}
+            onPodcastCreated={(pod) => {
+              setPodcasts((prev) => [pod, ...prev]);
+              showToast("Podcast created! Check your History tab.");
+            }}
+            showToast={showToast}
+          />
+        )}
+
         {/* ── History tab ───────────────────────────────────────────────────── */}
         {activeTab === "history" && (
           <div>
@@ -1302,6 +1820,11 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
                       >
                         <div className="flex-1 min-w-0">
                           <p className="font-semibold text-[#1B2B4B] truncate">{pod.address}</p>
+                          {pod.source_type && pod.source_type !== "address" && pod.source_label && (
+                            <p className="text-xs text-[#1A7A6E] font-medium mt-0.5 truncate">
+                              📄 {pod.source_label}
+                            </p>
+                          )}
                           <p className="text-sm text-[#1B2B4B]/40 mt-0.5">
                             {pod.city && pod.state ? `${pod.city}, ${pod.state} · ` : ""}
                             {pod.zestimate ? `Est. ${formatCurrency(pod.zestimate)} · ` : ""}
@@ -1309,6 +1832,11 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
                           </p>
                         </div>
                         <div className="flex items-center gap-2 flex-shrink-0">
+                          {pod.source_type && pod.source_type !== "address" && (
+                            <span className="text-xs text-purple-700 bg-purple-50 border border-purple-200 px-2 py-1 rounded-lg font-medium">
+                              Custom
+                            </span>
+                          )}
                           <span className="text-xs text-[#1A7A6E] bg-[#EDF4F3] border border-[#1A7A6E]/20 px-2 py-1 rounded-lg font-medium">
                             Completed
                           </span>

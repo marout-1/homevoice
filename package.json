@@ -10,15 +10,20 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.0",
+    "@mozilla/readability": "^0.6.0",
     "@supabase/ssr": "^0.5.0",
     "@supabase/supabase-js": "^2.45.0",
+    "jsdom": "^29.0.2",
+    "mammoth": "^1.12.0",
     "next": "16.2.3",
+    "pdf-parse": "^2.4.5",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "resend": "^6.11.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/jsdom": "^28.0.1",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
