@@ -35,6 +35,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const rawText: string = body.text?.trim();
+    const overrideVoiceId: string | null = body.voiceId ?? null;
 
     if (!rawText || rawText.length < 10) {
       return NextResponse.json({ available: false, provider: "none" });
@@ -46,23 +47,31 @@ export async function POST(req: NextRequest) {
       try {
         console.log("[tts] Trying ElevenLabs...");
 
-        // Use the user's cloned voice if they have one, otherwise fall back to default
+        // Voice priority: client-supplied override → DB lookup → env var → default Charlie
         let voiceId = process.env.ELEVENLABS_VOICE_ID || "IKne3meq5aSn9XLyUdCD"; // Charlie
-        try {
-          const supabase = await createClient();
-          const { data: { user } } = await supabase.auth.getUser();
-          if (user) {
-            const { data: profileData } = await supabase
-              .from("profiles")
-              .select("cloned_voice_id")
-              .eq("id", user.id)
-              .single();
-            if (profileData?.cloned_voice_id) {
-              voiceId = profileData.cloned_voice_id;
-              console.log("[tts] Using cloned voice:", voiceId);
+
+        if (overrideVoiceId) {
+          // Client passed the voice ID directly (fastest — no extra DB call)
+          voiceId = overrideVoiceId;
+          console.log("[tts] Using client-supplied voice:", voiceId);
+        } else {
+          // Fall back to DB lookup
+          try {
+            const supabase = await createClient();
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+              const { data: profileData } = await supabase
+                .from("profiles")
+                .select("cloned_voice_id")
+                .eq("id", user.id)
+                .single();
+              if (profileData?.cloned_voice_id) {
+                voiceId = profileData.cloned_voice_id;
+                console.log("[tts] Using cloned voice from DB:", voiceId);
+              }
             }
-          }
-        } catch { /* non-fatal — fall back to default voice */ }
+          } catch { /* non-fatal — fall back to default voice */ }
+        }
         const text = truncateAtSentence(rawText, 5000);
         const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
           method: "POST",

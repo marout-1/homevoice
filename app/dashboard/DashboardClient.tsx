@@ -1098,7 +1098,10 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
         const ttsRes = await fetch("/api/tts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: scriptFullText }),
+          body: JSON.stringify({
+            text: scriptFullText,
+            ...(clonedVoiceId ? { voiceId: clonedVoiceId } : {}),
+          }),
         });
 
         if (ttsRes.ok) {
@@ -1557,6 +1560,31 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
                       </div>
                     )}
                   </div>
+
+                  {/* Voice selector — only shown when user has a cloned voice */}
+                  {clonedVoiceId && (
+                    <div className="flex items-center justify-between bg-[#F9F8F6] border border-[#E8E4DC] rounded-xl px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">🎤</span>
+                        <div>
+                          <p className="text-sm font-semibold text-[#1B2B4B]">Use my cloned voice</p>
+                          <p className="text-xs text-[#1B2B4B]/40">{clonedVoiceName ?? "My Voice"}</p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (clonedVoiceId) {
+                            // Toggle off by temporarily clearing — user can re-enable from profile
+                            setClonedVoiceId(null);
+                          }
+                        }}
+                        className="text-xs text-[#1A7A6E] font-semibold hover:underline"
+                      >
+                        ✓ Active
+                      </button>
+                    </div>
+                  )}
 
                   <button
                     type="submit"
