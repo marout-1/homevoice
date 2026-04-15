@@ -22,7 +22,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "No text provided." }, { status: 400 });
   }
 
-  const voiceId = process.env.ELEVENLABS_VOICE_ID || "21m00Tcm4TlvDq8ikWAM";
+  // eleven_turbo_v2_5 — newest model, fastest + best quality
+  // Default: "Charlie" — warm, natural podcast host voice
+  const voiceId = process.env.ELEVENLABS_VOICE_ID || "IKne3meq5aSn9XLyUdCD"; // Charlie
 
   const elevenRes = await fetch(
     `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
@@ -34,12 +36,12 @@ export async function POST(req: NextRequest) {
         Accept: "audio/mpeg",
       },
       body: JSON.stringify({
-        text: text.slice(0, 3000), // cap at 3000 chars to stay fast
-        model_id: "eleven_turbo_v2",
+        text: text.slice(0, 5000),
+        model_id: "eleven_turbo_v2_5",
         voice_settings: {
-          stability: 0.5,
+          stability: 0.45,
           similarity_boost: 0.75,
-          style: 0.3,
+          style: 0.35,
           use_speaker_boost: true,
         },
       }),

@@ -827,6 +827,8 @@ interface Profile {
   brand_name: string;
   plan: string;
   podcasts_this_month: number;
+  cloned_voice_id?: string | null;
+  cloned_voice_name?: string | null;
 }
 
 interface Podcast {
@@ -903,6 +905,19 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
   const [newBrandName, setNewBrandName] = useState(profile.brand_name);
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileSaved, setProfileSaved] = useState(false);
+
+  // Voice cloning state
+  const [clonedVoiceId, setClonedVoiceId] = useState<string | null>(profile.cloned_voice_id ?? null);
+  const [clonedVoiceName, setClonedVoiceName] = useState<string | null>(profile.cloned_voice_name ?? null);
+  const [voiceCloneStep, setVoiceCloneStep] = useState<"idle" | "recording" | "recorded" | "uploading" | "done" | "error">("idle");
+  const [voiceCloneError, setVoiceCloneError] = useState<string | null>(null);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+  const [audioPreviewUrl, setAudioPreviewUrl] = useState<string | null>(null);
+  const [deletingVoice, setDeletingVoice] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const chunksRef = useRef<BlobPart[]>([]);
 
   // Onboarding modal
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -1146,6 +1161,88 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
     if (typeof window === "undefined") return;
     window.speechSynthesis.cancel();
     setAudioPlaying(false);
+  }
+
+  // ── Voice cloning handlers ────────────────────────────────────────────────
+
+  async function startRecording() {
+    setVoiceCloneError(null);
+    setAudioBlob(null);
+    setAudioPreviewUrl(null);
+    chunksRef.current = [];
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
+      const recorder = new MediaRecorder(stream, { mimeType });
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      recorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(chunksRef.current, { type: mimeType });
+        setAudioBlob(blob);
+        setAudioPreviewUrl(URL.createObjectURL(blob));
+        setVoiceCloneStep("recorded");
+        if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      };
+
+      recorder.start(250);
+      setVoiceCloneStep("recording");
+      setRecordingSeconds(0);
+      recordingTimerRef.current = setInterval(() => setRecordingSeconds((s) => s + 1), 1000);
+    } catch {
+      setVoiceCloneError("Microphone access denied. Please allow microphone access and try again.");
+    }
+  }
+
+  function stopRecording() {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+    if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+  }
+
+  async function submitVoiceClone() {
+    if (!audioBlob) return;
+    if (recordingSeconds < 10) {
+      setVoiceCloneError("Recording is too short — aim for at least 30 seconds for best results.");
+      return;
+    }
+    setVoiceCloneStep("uploading");
+    setVoiceCloneError(null);
+    try {
+      const form = new FormData();
+      form.append("audio", audioBlob, "recording.webm");
+      form.append("name", `${user.email?.split("@")[0] ?? "My"} Voice`);
+      const res = await fetch("/api/voice/clone", { method: "POST", body: form });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        setVoiceCloneError(data.error || "Cloning failed. Please try again.");
+        setVoiceCloneStep("error");
+        return;
+      }
+      setClonedVoiceId(data.voice_id);
+      setClonedVoiceName(data.name);
+      setVoiceCloneStep("done");
+    } catch {
+      setVoiceCloneError("Network error. Please try again.");
+      setVoiceCloneStep("error");
+    }
+  }
+
+  async function deleteClonedVoice() {
+    if (!confirm("Delete your cloned voice? All future podcasts will use the default voice.")) return;
+    setDeletingVoice(true);
+    try {
+      await fetch("/api/voice/delete", { method: "DELETE" });
+      setClonedVoiceId(null);
+      setClonedVoiceName(null);
+      setVoiceCloneStep("idle");
+      setAudioBlob(null);
+      setAudioPreviewUrl(null);
+    } finally {
+      setDeletingVoice(false);
+    }
   }
 
   async function handleSaveProfile(e: React.FormEvent) {
@@ -1954,6 +2051,130 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
                   {profileSaved ? "✓ Saved" : savingProfile ? "Saving…" : "Save brand name"}
                 </button>
               </form>
+            </div>
+
+            {/* ── Voice Cloning card ─────────────────────────────────────── */}
+            <div className="bg-white rounded-2xl border border-[#E8E4DC] shadow-sm p-6">
+              <div className="flex items-start justify-between mb-1">
+                <h3 className="font-semibold text-[#1B2B4B]">🎙️ Your Voice</h3>
+                {clonedVoiceId && (
+                  <span className="text-xs bg-[#1A7A6E]/10 text-[#1A7A6E] font-semibold px-2.5 py-1 rounded-full">Active</span>
+                )}
+              </div>
+              <p className="text-sm text-[#1B2B4B]/45 mb-5">
+                Record your voice and we&apos;ll clone it so every podcast sounds like you.
+              </p>
+
+              {/* Already has a cloned voice */}
+              {clonedVoiceId && voiceCloneStep !== "recording" && voiceCloneStep !== "recorded" && voiceCloneStep !== "uploading" ? (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3 bg-[#1A7A6E]/5 rounded-xl px-4 py-3">
+                    <span className="text-2xl">🎤</span>
+                    <div>
+                      <p className="text-sm font-semibold text-[#1B2B4B]">{clonedVoiceName ?? "My Voice"}</p>
+                      <p className="text-xs text-[#1B2B4B]/40">All new podcasts will use your cloned voice</p>
+                    </div>
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => { setVoiceCloneStep("idle"); setAudioBlob(null); setAudioPreviewUrl(null); }}
+                      className="flex-1 border border-[#1A7A6E] text-[#1A7A6E] text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-[#1A7A6E]/5 transition-colors"
+                    >
+                      Re-record
+                    </button>
+                    <button
+                      onClick={deleteClonedVoice}
+                      disabled={deletingVoice}
+                      className="text-sm text-red-400 hover:text-red-600 px-4 py-2.5 transition-colors disabled:opacity-40"
+                    >
+                      {deletingVoice ? "Removing…" : "Remove"}
+                    </button>
+                  </div>
+                </div>
+              ) : voiceCloneStep === "idle" || voiceCloneStep === "error" ? (
+                /* Idle — show script + record button */
+                <div className="space-y-4">
+                  <div className="bg-[#F5F3EE] rounded-xl p-4 text-sm text-[#1B2B4B]/70 leading-relaxed">
+                    <p className="font-semibold text-[#1B2B4B] mb-2">📋 Read this script out loud:</p>
+                    <p>&ldquo;Welcome to HomeVoice — your personal real estate podcast. I help buyers, sellers, and investors understand the local market in a way that&apos;s clear, engaging, and totally personalized. Whether you&apos;re looking at a starter home or a major investment, I&apos;m here to break down the numbers and tell the story behind every property.&rdquo;</p>
+                  </div>
+                  {voiceCloneError && (
+                    <p className="text-sm text-red-500 bg-red-50 rounded-xl px-4 py-3">{voiceCloneError}</p>
+                  )}
+                  <button
+                    onClick={startRecording}
+                    className="w-full bg-[#1A7A6E] hover:bg-[#15695F] text-white text-sm font-semibold px-5 py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
+                  >
+                    <span className="w-2.5 h-2.5 rounded-full bg-red-400 animate-pulse" />
+                    Start Recording
+                  </button>
+                  <p className="text-xs text-center text-[#1B2B4B]/30">Aim for 30–60 seconds in a quiet room</p>
+                </div>
+              ) : voiceCloneStep === "recording" ? (
+                /* Recording in progress */
+                <div className="space-y-4 text-center">
+                  <div className="flex items-center justify-center gap-3">
+                    <span className="w-3 h-3 rounded-full bg-red-500 animate-pulse" />
+                    <span className="text-lg font-bold text-[#1B2B4B] tabular-nums">
+                      {String(Math.floor(recordingSeconds / 60)).padStart(2, "0")}:{String(recordingSeconds % 60).padStart(2, "0")}
+                    </span>
+                    <span className="text-sm text-[#1B2B4B]/40">Recording…</span>
+                  </div>
+                  <div className="bg-[#F5F3EE] rounded-xl p-4 text-sm text-[#1B2B4B]/70 leading-relaxed">
+                    <p>&ldquo;Welcome to HomeVoice — your personal real estate podcast. I help buyers, sellers, and investors understand the local market in a way that&apos;s clear, engaging, and totally personalized. Whether you&apos;re looking at a starter home or a major investment, I&apos;m here to break down the numbers and tell the story behind every property.&rdquo;</p>
+                  </div>
+                  <button
+                    onClick={stopRecording}
+                    className="w-full bg-red-500 hover:bg-red-600 text-white text-sm font-semibold px-5 py-3 rounded-xl transition-colors"
+                  >
+                    ⏹ Stop Recording
+                  </button>
+                </div>
+              ) : voiceCloneStep === "recorded" ? (
+                /* Preview + submit */
+                <div className="space-y-4">
+                  <p className="text-sm font-semibold text-[#1B2B4B]">Review your recording:</p>
+                  {audioPreviewUrl && (
+                    <audio controls src={audioPreviewUrl} className="w-full rounded-xl" />
+                  )}
+                  {recordingSeconds < 10 && (
+                    <p className="text-xs text-amber-600 bg-amber-50 rounded-xl px-4 py-2">
+                      Recording is very short ({recordingSeconds}s). For best results, aim for 30+ seconds.
+                    </p>
+                  )}
+                  {voiceCloneError && (
+                    <p className="text-sm text-red-500 bg-red-50 rounded-xl px-4 py-3">{voiceCloneError}</p>
+                  )}
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => { setVoiceCloneStep("idle"); setAudioBlob(null); setAudioPreviewUrl(null); }}
+                      className="flex-1 border border-[#E8E4DC] text-[#1B2B4B]/60 text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-[#F5F3EE] transition-colors"
+                    >
+                      Re-record
+                    </button>
+                    <button
+                      onClick={submitVoiceClone}
+                      className="flex-1 bg-[#1A7A6E] hover:bg-[#15695F] text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors"
+                    >
+                      Clone My Voice →
+                    </button>
+                  </div>
+                </div>
+              ) : voiceCloneStep === "uploading" ? (
+                /* Processing */
+                <div className="text-center py-6 space-y-3">
+                  <div className="w-10 h-10 border-2 border-[#1A7A6E] border-t-transparent rounded-full animate-spin mx-auto" />
+                  <p className="text-sm font-semibold text-[#1B2B4B]">Cloning your voice…</p>
+                  <p className="text-xs text-[#1B2B4B]/40">This takes about 15 seconds</p>
+                </div>
+              ) : voiceCloneStep === "done" ? (
+                /* Success */
+                <div className="text-center py-4 space-y-3">
+                  <div className="text-4xl">🎉</div>
+                  <p className="text-sm font-bold text-[#1B2B4B]">Voice cloned successfully!</p>
+                  <p className="text-xs text-[#1B2B4B]/40">Your next podcast will be narrated in your voice.</p>
+                </div>
+              ) : null}
             </div>
 
             {!isPro && (

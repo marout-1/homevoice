@@ -11,6 +11,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/app/lib/supabase/server";
 
 export const maxDuration = 60;
 
@@ -44,7 +45,24 @@ export async function POST(req: NextRequest) {
     if (elKey) {
       try {
         console.log("[tts] Trying ElevenLabs...");
-        const voiceId = process.env.ELEVENLABS_VOICE_ID || "21m00Tcm4TlvDq8ikWAM"; // Rachel
+
+        // Use the user's cloned voice if they have one, otherwise fall back to default
+        let voiceId = process.env.ELEVENLABS_VOICE_ID || "IKne3meq5aSn9XLyUdCD"; // Charlie
+        try {
+          const supabase = await createClient();
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+            const { data: profileData } = await supabase
+              .from("profiles")
+              .select("cloned_voice_id")
+              .eq("id", user.id)
+              .single();
+            if (profileData?.cloned_voice_id) {
+              voiceId = profileData.cloned_voice_id;
+              console.log("[tts] Using cloned voice:", voiceId);
+            }
+          }
+        } catch { /* non-fatal — fall back to default voice */ }
         const text = truncateAtSentence(rawText, 5000);
         const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
           method: "POST",
@@ -55,11 +73,11 @@ export async function POST(req: NextRequest) {
           },
           body: JSON.stringify({
             text,
-            model_id: "eleven_multilingual_v2",
+            model_id: "eleven_turbo_v2_5",
             voice_settings: {
-              stability: 0.65,
-              similarity_boost: 0.80,
-              style: 0.20,
+              stability: 0.45,        // lower = more natural variation in delivery
+              similarity_boost: 0.75, // how closely to stick to the voice clone
+              style: 0.35,            // expressiveness / podcast energy
               use_speaker_boost: true,
             },
           }),
