@@ -842,57 +842,7 @@ function CustomContentTab({
 
 // ─── Initiative 01: Post-first-podcast voice clone modal ─────────────────────
 
-function VoiceCloneModal({
-  onDismiss,
-  onGoClone,
-}: {
-  onDismiss: () => void;
-  onGoClone: () => void;
-}) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#1B2B4B]/50 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl border border-[#E8E4DC] shadow-2xl max-w-sm w-full p-8 text-center relative animate-in fade-in zoom-in-95 duration-200">
-        <button
-          onClick={onDismiss}
-          className="absolute top-4 right-4 text-[#1B2B4B]/25 hover:text-[#1B2B4B]/50 transition-colors text-xl leading-none"
-          aria-label="Dismiss"
-        >
-          ×
-        </button>
 
-        <div className="w-16 h-16 bg-[#EDF4F3] rounded-2xl flex items-center justify-center mx-auto mb-5">
-          <svg className="w-8 h-8 text-[#1A7A6E]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-          </svg>
-        </div>
-
-        <div className="inline-block bg-[#1A7A6E]/10 text-[#1A7A6E] text-xs font-bold px-3 py-1 rounded-full mb-3">
-          Your podcast is live! 🎉
-        </div>
-
-        <h2 className="text-xl font-bold text-[#1B2B4B] mb-3">
-          Now make it sound like <em>you</em>.
-        </h2>
-        <p className="text-[#1B2B4B]/55 text-sm leading-relaxed mb-6">
-          Clone your voice in 60 seconds — every future podcast will be narrated in your own voice. Your clients will instantly know it&apos;s you.
-        </p>
-
-        <button
-          onClick={onGoClone}
-          className="w-full bg-[#1A7A6E] hover:bg-[#15695F] text-white font-semibold py-3.5 rounded-xl transition-colors text-sm mb-3"
-        >
-          Clone My Voice →
-        </button>
-        <button
-          onClick={onDismiss}
-          className="block w-full text-center text-xs text-[#1B2B4B]/30 hover:text-[#1B2B4B]/50 transition-colors"
-        >
-          Maybe later
-        </button>
-      </div>
-    </div>
-  );
-}
 
 // ─── Constants & helpers ──────────────────────────────────────────────────────
 
@@ -974,6 +924,7 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
   const [savedPodcastId, setSavedPodcastId] = useState<string | null>(null);
   const [shareCopied, setShareCopied] = useState(false);
+  const [showFirstRunTip, setShowFirstRunTip] = useState(false);
 
   // Address pre-validation
   const [addressWarning, setAddressWarning] = useState<string | null>(null);
@@ -997,11 +948,7 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
   const chunksRef = useRef<BlobPart[]>([]);
 
   // Initiative 01: Post-first-podcast voice clone modal
-  const [showVoiceCloneModal, setShowVoiceCloneModal] = useState(false);
-
   // Initiative 02: Clone banner dismissed (7-day localStorage)
-  const [bannerDismissed, setBannerDismissed] = useState(false);
-
   // Onboarding modal
   const [showOnboarding, setShowOnboarding] = useState(false);
 
@@ -1035,26 +982,18 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
     } catch { /* ignore */ }
   }, []);
 
+  useEffect(() => {
+    const seen = localStorage.getItem("homevoice_generate_tip_seen");
+    if (!seen) {
+      setShowFirstRunTip(true);
+      localStorage.setItem("homevoice_generate_tip_seen", "1");
+    }
+  }, []);
+
   function dismissOnboarding() {
     setShowOnboarding(false);
     try { localStorage.setItem(ONBOARDING_KEY, "1"); } catch { /* ignore */ }
   }
-
-  // Check if clone banner was dismissed in the last 7 days
-  useEffect(() => {
-    try {
-      const dismissed = localStorage.getItem("homevoice_clone_banner_dismissed");
-      if (dismissed) {
-        const dismissedAt = parseInt(dismissed, 10);
-        const sevenDays = 7 * 24 * 60 * 60 * 1000;
-        if (Date.now() - dismissedAt < sevenDays) {
-          setBannerDismissed(true);
-        } else {
-          localStorage.removeItem("homevoice_clone_banner_dismissed");
-        }
-      }
-    } catch { /* ignore */ }
-  }, []);
 
   async function simulateSteps() {
     for (let i = 0; i < STEPS.length; i++) {
@@ -1159,10 +1098,7 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
         .eq("id", user.id);
       setProfile((p) => ({ ...p, podcasts_this_month: usedThisMonth + 1, podcasts_count: newPodcastsCount }));
 
-      // Initiative 01: show voice clone modal after first podcast if not dismissed
-      if (newPodcastsCount === 1 && !clonedVoiceId && !profile.onboarding_clone_dismissed) {
-        setShowVoiceCloneModal(true);
-      }
+      
 
       const { data: newPodcasts } = await supabase
         .from("podcasts")
@@ -1266,6 +1202,27 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
       setAudioPlaying(false);
       return;
     }
+
+  async function handleCopyLink() {
+    if (!currentPodcast?.id && !savedPodcastId) return;
+    const podcastId = savedPodcastId || currentPodcast?.id;
+    const url = `${window.location.origin}/r/${podcastId}`;
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      const el = document.createElement("textarea");
+      el.value = url;
+      el.style.position = "fixed";
+      el.style.opacity = "0";
+      document.body.appendChild(el);
+      el.focus();
+      el.select();
+      document.execCommand("copy");
+      document.body.removeChild(el);
+    }
+    setShareCopied(true);
+    setTimeout(() => setShareCopied(false), 2000);
+  }
     if (typeof window === "undefined") return;
     window.speechSynthesis.cancel();
     setAudioPlaying(false);
@@ -1419,26 +1376,6 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
       {showOnboarding && <OnboardingModal onDismiss={dismissOnboarding} />}
 
       {/* Initiative 01: Voice clone modal (post-first-podcast) */}
-      {showVoiceCloneModal && (
-        <VoiceCloneModal
-          onDismiss={async () => {
-            setShowVoiceCloneModal(false);
-            await fetch("/api/profile", {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ onboarding_clone_dismissed: true }),
-            });
-            setProfile(p => ({ ...p, onboarding_clone_dismissed: true }));
-          }}
-          onGoClone={() => {
-            setShowVoiceCloneModal(false);
-            setActiveTab("profile");
-            setTimeout(() => {
-              document.getElementById("voice-clone-section")?.scrollIntoView({ behavior: "smooth" });
-            }, 100);
-          }}
-        />
-      )}
 
       {/* ── Top nav (fixed to viewport) ──────────────────────────────────── */}
       <nav className="bg-white border-b border-[#E8E4DC] px-6 py-4 fixed top-0 left-0 right-0 z-40">
@@ -1490,7 +1427,7 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
       <div className="min-h-screen bg-[#FAFAF8] pt-[65px]">
       <div className="max-w-5xl mx-auto px-6 py-8">
         {/* ── Tab nav ───────────────────────────────────────────────────────── */}
-        <div className="flex gap-1 bg-[#F5F3EF] border border-[#E8E4DC] p-1 rounded-xl w-fit mb-8">
+        <div role="tablist" className="flex gap-1 bg-[#F5F3EF] border border-[#E8E4DC] p-1 rounded-xl w-fit mb-8">
           {([
             { id: "generate", label: "🎙️ Generate" },
             { id: "custom",   label: "📄 Custom Content" },
@@ -1499,8 +1436,10 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
           ] as const).map((tab) => (
             <button
               key={tab.id}
+              role="tab"
               type="button"
               onClick={() => setActiveTab(tab.id)}
+              aria-selected={activeTab === tab.id}
               className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                 activeTab === tab.id
                   ? "bg-white text-[#1B2B4B] shadow-sm border border-[#E8E4DC]"
@@ -1542,8 +1481,9 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
           ];
 
           return (
-            <div className="bg-white border border-[#E8E4DC] rounded-2xl px-5 py-4 mb-6 shadow-sm">
+            <div className="bg-white border border-[#E8E4DC] rounded-2xl p-4 mb-6 shadow-sm">
               <div className="flex items-center justify-between mb-3">
+              <p className="text-xs font-semibold text-[#1B2B4B]/40 uppercase tracking-widest mb-3">Get set up</p>
                 <p className="text-xs font-semibold text-[#1B2B4B]/50 uppercase tracking-wide">Setup Progress</p>
                 <p className="text-xs font-bold text-[#1A7A6E]">{completedCount} / 3 complete</p>
               </div>
@@ -1556,7 +1496,7 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
                       disabled={step.done}
                       aria-label={step.done ? `${step.label} — complete` : `${step.label} — click to set up`}
                     >
-                      <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold transition-all ${
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold transition-all ${
                         step.done
                           ? "bg-[#1A7A6E] text-white"
                           : "bg-[#F5F3EF] text-[#1B2B4B]/40 group-hover:bg-[#EDF4F3] group-hover:text-[#1A7A6E]"
@@ -1604,44 +1544,6 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
               </div>
             )}
 
-            {/* Initiative 02: Clone nudge banner */}
-            {!clonedVoiceId && !bannerDismissed && (
-              <div className="bg-[#1A7A6E] rounded-2xl p-4 flex items-center gap-4">
-                <div className="w-9 h-9 bg-white/20 rounded-xl flex items-center justify-center flex-shrink-0">
-                  <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                  </svg>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-white font-semibold text-sm">Your podcasts could sound like you.</p>
-                  <p className="text-white/70 text-xs mt-0.5">Clone your voice in 60 seconds — free, one recording.</p>
-                </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <button
-                    onClick={() => {
-                      setActiveTab("profile");
-                      setTimeout(() => {
-                        document.getElementById("voice-clone-section")?.scrollIntoView({ behavior: "smooth" });
-                      }, 100);
-                    }}
-                    className="bg-white text-[#1A7A6E] text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-white/90 transition-colors whitespace-nowrap"
-                  >
-                    Clone My Voice
-                  </button>
-                  <button
-                    onClick={() => {
-                      setBannerDismissed(true);
-                      try { localStorage.setItem("homevoice_clone_banner_dismissed", String(Date.now())); } catch { /* ignore */ }
-                    }}
-                    className="text-white/50 hover:text-white transition-colors text-lg leading-none"
-                    aria-label="Dismiss for 7 days"
-                  >
-                    ×
-                  </button>
-                </div>
-              </div>
-            )}
-
             {/* Generate form */}
             {!result && (
               <div className="bg-white rounded-2xl border border-[#E8E4DC] shadow-sm p-6">
@@ -1650,6 +1552,25 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
 
                 <form onSubmit={handleGenerate} className="space-y-4">
                   <div>
+                {showFirstRunTip && (
+                  <div className="flex items-start gap-3 bg-[#1B2B4B] text-white rounded-2xl p-4 mb-4">
+                    <div className="w-6 h-6 rounded-full bg-[#1A7A6E] flex items-center justify-center shrink-0 mt-0.5" aria-hidden="true">
+                      <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm font-semibold mb-0.5">Enter any U.S. property address to get started</p>
+                      <p className="text-xs text-white/60">We pull live market data and generate a narrated audio report in about 90 seconds.</p>
+                    </div>
+                    <button
+                      onClick={() => setShowFirstRunTip(false)}
+                      className="text-white/40 hover:text-white transition-colors shrink-0 focus:outline-none focus:ring-1 focus:ring-white rounded"
+                      aria-label="Dismiss tip"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                  </div>
+                )}
+
                     <label className="block text-sm font-semibold text-[#1B2B4B] mb-1.5">
                       Property Address
                     </label>
@@ -1902,23 +1823,28 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
                   <h3 className="font-bold text-[#1B2B4B]">Your podcast is ready 🎉</h3>
                   <div className="flex items-center gap-3">
                     {/* Share link */}
-                    {savedPodcastId && (
+                    {clonedVoiceId ? (
                       <button
-                        onClick={() => {
-                          const url = `${window.location.origin}/r/${savedPodcastId}`;
-                          navigator.clipboard.writeText(url).then(() => {
-                            setShareCopied(true);
-                            setTimeout(() => setShareCopied(false), 2000);
-                          });
-                        }}
-                        className="flex items-center gap-1.5 border border-[#E8E4DC] text-[#1B2B4B] hover:bg-[#F5F3EF] text-sm font-medium px-4 py-2 rounded-xl transition-colors"
+                        onClick={handleCopyLink}
+                        className="flex items-center gap-2 border border-[#E8E4DC] bg-white hover:bg-[#F5F3EF] text-[#1B2B4B] text-sm font-medium px-4 py-2.5 rounded-xl transition-colors"
                       >
-                        {shareCopied ? (
-                          <><span className="text-[#1A7A6E]">✓</span> Link copied!</>
-                        ) : (
-                          <><svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg> Share</>
-                        )}
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                        {shareCopied ? "Copied!" : "Copy share link"}
                       </button>
+                    ) : (
+                      <div className="relative group">
+                        <button
+                          disabled
+                          aria-disabled="true"
+                          className="flex items-center gap-2 border border-[#E8E4DC] bg-[#F5F3EF] text-[#1B2B4B]/30 text-sm font-medium px-4 py-2.5 rounded-xl cursor-not-allowed"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                          Copy share link
+                        </button>
+                        <div role="tooltip" className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-[#1B2B4B] text-white text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                          Add your voice to unlock sharing
+                        </div>
+                      </div>
                     )}
                     <button
                       onClick={() => {
@@ -2080,6 +2006,25 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
                       <p className="text-xs text-[#1B2B4B]/30">
                         💡 Tip: Play this at your next open house or attach it to your listing email.
                       </p>
+
+                {/* Inline voice nudge — non-dismissable, shown until voice is cloned */}
+                {!clonedVoiceId && (
+                  <div className="mt-4 border border-[#1A7A6E]/30 bg-[#EDF4F3] rounded-2xl p-4 flex items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-[#1A7A6E]">Hear this report in YOUR voice</p>
+                      <p className="text-xs text-[#1B2B4B]/60 mt-0.5">Record 60 seconds once — every future report plays in your voice.</p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setActiveTab("profile");
+                        setTimeout(() => document.getElementById("voice-clone-section")?.scrollIntoView({ behavior: "smooth" }), 100);
+                      }}
+                      className="shrink-0 bg-[#1A7A6E] hover:bg-[#15695F] text-white text-xs font-bold px-4 py-2 rounded-xl transition-colors whitespace-nowrap"
+                    >
+                      Record My Voice →
+                    </button>
+                  </div>
+                )}
                     </>
                   ) : (
                     <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 text-sm text-amber-700">
@@ -2159,15 +2104,19 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
               )}
             </div>
             {podcasts.length === 0 ? (
-              <div className="bg-white rounded-2xl border border-[#E8E4DC] shadow-sm p-12 text-center">
-                <div className="w-16 h-16 bg-[#EDF4F3] rounded-2xl flex items-center justify-center mx-auto mb-4 text-3xl">🎙️</div>
-                <p className="font-semibold text-[#1B2B4B] mb-2">No podcasts yet</p>
-                <p className="text-sm text-[#1B2B4B]/40 mb-5">Your generated podcasts will appear here. Each one is saved automatically.</p>
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <div className="w-16 h-16 bg-[#EDF4F3] rounded-2xl flex items-center justify-center mb-4">
+                  <svg className="w-8 h-8 text-[#1A7A6E]" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/>
+                  </svg>
+                </div>
+                <h3 className="text-base font-semibold text-[#1B2B4B] mb-1">No reports yet</h3>
+                <p className="text-sm text-[#1B2B4B]/50 mb-5 max-w-xs">Generate your first market report and it will appear here.</p>
                 <button
                   onClick={() => setActiveTab("generate")}
-                  className="bg-[#1A7A6E] hover:bg-[#15695F] text-white text-sm font-semibold px-5 py-2.5 rounded-xl transition-colors"
+                  className="bg-[#1A7A6E] hover:bg-[#15695F] text-white text-sm font-semibold px-5 py-2.5 rounded-xl transition-colors focus:outline-none focus:ring-2 focus:ring-[#1A7A6E] focus:ring-offset-2"
                 >
-                  Generate your first podcast →
+                  Generate your first report →
                 </button>
               </div>
             ) : (

@@ -36,22 +36,27 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center px-6">
+    <div className="min-h-screen bg-[#FAFAF8] flex flex-col items-center justify-center px-6">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <Link href="/" className="inline-flex items-center gap-2 mb-6">
-            <span className="text-2xl">🏠</span>
-            <span className="font-bold text-gray-900 text-xl">HomeVoice</span>
+            <div className="w-8 h-8 bg-[#1A7A6E] rounded-lg flex items-center justify-center">
+              <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
+                <polyline points="9,22 9,12 15,12 15,22" fill="none" stroke="white" strokeWidth="2"/>
+              </svg>
+            </div>
+            <span className="font-bold text-[#1B2B4B] text-xl tracking-tight">HomeVoice</span>
           </Link>
-          <h1 className="text-2xl font-bold text-gray-900">Welcome back</h1>
-          <p className="text-gray-500 text-sm mt-1">Sign in to your account</p>
+          <h1 className="text-2xl font-bold text-[#1B2B4B]">Welcome back</h1>
+          <p className="text-[#1B2B4B]/50 text-sm mt-1">Sign in to your account</p>
         </div>
 
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+        <div className="bg-white rounded-2xl shadow-sm border border-[#E8E4DC] p-6">
           {/* Google login */}
           <button
             onClick={handleGoogleLogin}
-            className="w-full flex items-center justify-center gap-3 border border-gray-200 hover:border-gray-300 hover:bg-gray-50 text-gray-700 font-medium py-3 rounded-xl transition-colors text-sm mb-4"
+            className="w-full flex items-center justify-center gap-3 border border-[#E8E4DC] hover:border-[#1A7A6E]/30 hover:bg-[#F5F3EF] text-[#1B2B4B]/70 font-medium py-3 rounded-xl transition-colors text-sm mb-4"
           >
             <svg className="w-4 h-4" viewBox="0 0 24 24">
               <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -64,37 +69,40 @@ export default function LoginPage() {
 
           <div className="relative my-4">
             <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-gray-100"></div>
+              <div className="w-full border-t border-[#E8E4DC]"></div>
             </div>
-            <div className="relative flex justify-center text-xs text-gray-400 bg-white px-3">or</div>
+            <div className="relative flex justify-center text-xs text-[#1B2B4B]/30 bg-white px-3">or</div>
           </div>
 
-          <form onSubmit={handleLogin} className="space-y-4">
+          <form onSubmit={handleLogin} className="space-y-4" noValidate>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Email</label>
+              <label htmlFor="login-email" className="block text-sm font-medium text-[#1B2B4B]/70 mb-1.5">Email</label>
               <input
+                id="login-email"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 placeholder="you@example.com"
-                className="w-full border border-gray-200 rounded-lg px-4 py-3 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                aria-describedby={error ? "login-error" : undefined}
+                className="w-full border border-[#E8E4DC] rounded-xl px-4 py-3 text-sm text-[#1B2B4B] placeholder-[#1B2B4B]/30 focus:outline-none focus:ring-2 focus:ring-[#1A7A6E] focus:border-transparent transition-shadow"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Password</label>
+              <label htmlFor="login-password" className="block text-sm font-medium text-[#1B2B4B]/70 mb-1.5">Password</label>
               <input
+                id="login-password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 placeholder="••••••••"
-                className="w-full border border-gray-200 rounded-lg px-4 py-3 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full border border-[#E8E4DC] rounded-xl px-4 py-3 text-sm text-[#1B2B4B] placeholder-[#1B2B4B]/30 focus:outline-none focus:ring-2 focus:ring-[#1A7A6E] focus:border-transparent transition-shadow"
               />
             </div>
 
             {error && (
-              <div className="bg-red-50 text-red-600 text-sm px-4 py-3 rounded-lg border border-red-100">
+              <div id="login-error" role="alert" className="bg-red-50 text-red-600 text-sm px-4 py-3 rounded-xl border border-red-100">
                 {error}
               </div>
             )}
@@ -102,16 +110,16 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-semibold py-3 rounded-xl transition-colors text-sm"
+              className="w-full bg-[#1A7A6E] hover:bg-[#15695F] disabled:bg-[#1A7A6E]/50 text-white font-semibold py-3 rounded-xl transition-colors text-sm focus:outline-none focus:ring-2 focus:ring-[#1A7A6E] focus:ring-offset-2"
             >
               {loading ? "Signing in…" : "Sign in"}
             </button>
           </form>
         </div>
 
-        <p className="text-center text-sm text-gray-500 mt-4">
+        <p className="text-center text-sm text-[#1B2B4B]/45 mt-4">
           Don&apos;t have an account?{" "}
-          <Link href="/signup" className="text-blue-600 hover:text-blue-700 font-medium">
+          <Link href="/signup" className="text-[#1A7A6E] hover:text-[#15695F] font-medium">
             Sign up free
           </Link>
         </p>
