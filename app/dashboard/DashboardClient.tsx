@@ -840,6 +840,60 @@ function CustomContentTab({
   );
 }
 
+// ─── Initiative 01: Post-first-podcast voice clone modal ─────────────────────
+
+function VoiceCloneModal({
+  onDismiss,
+  onGoClone,
+}: {
+  onDismiss: () => void;
+  onGoClone: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#1B2B4B]/50 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl border border-[#E8E4DC] shadow-2xl max-w-sm w-full p-8 text-center relative animate-in fade-in zoom-in-95 duration-200">
+        <button
+          onClick={onDismiss}
+          className="absolute top-4 right-4 text-[#1B2B4B]/25 hover:text-[#1B2B4B]/50 transition-colors text-xl leading-none"
+          aria-label="Dismiss"
+        >
+          ×
+        </button>
+
+        <div className="w-16 h-16 bg-[#EDF4F3] rounded-2xl flex items-center justify-center mx-auto mb-5">
+          <svg className="w-8 h-8 text-[#1A7A6E]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+          </svg>
+        </div>
+
+        <div className="inline-block bg-[#1A7A6E]/10 text-[#1A7A6E] text-xs font-bold px-3 py-1 rounded-full mb-3">
+          Your podcast is live! 🎉
+        </div>
+
+        <h2 className="text-xl font-bold text-[#1B2B4B] mb-3">
+          Now make it sound like <em>you</em>.
+        </h2>
+        <p className="text-[#1B2B4B]/55 text-sm leading-relaxed mb-6">
+          Clone your voice in 60 seconds — every future podcast will be narrated in your own voice. Your clients will instantly know it&apos;s you.
+        </p>
+
+        <button
+          onClick={onGoClone}
+          className="w-full bg-[#1A7A6E] hover:bg-[#15695F] text-white font-semibold py-3.5 rounded-xl transition-colors text-sm mb-3"
+        >
+          Clone My Voice →
+        </button>
+        <button
+          onClick={onDismiss}
+          className="block w-full text-center text-xs text-[#1B2B4B]/30 hover:text-[#1B2B4B]/50 transition-colors"
+        >
+          Maybe later
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Constants & helpers ──────────────────────────────────────────────────────
 
 const FREE_LIMIT = 10;
@@ -848,8 +902,10 @@ interface Profile {
   brand_name: string;
   plan: string;
   podcasts_this_month: number;
+  podcasts_count?: number | null;
   cloned_voice_id?: string | null;
   cloned_voice_name?: string | null;
+  onboarding_clone_dismissed?: boolean | null;
 }
 
 interface Podcast {
@@ -940,6 +996,12 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
 
+  // Initiative 01: Post-first-podcast voice clone modal
+  const [showVoiceCloneModal, setShowVoiceCloneModal] = useState(false);
+
+  // Initiative 02: Clone banner dismissed (7-day localStorage)
+  const [bannerDismissed, setBannerDismissed] = useState(false);
+
   // Onboarding modal
   const [showOnboarding, setShowOnboarding] = useState(false);
 
@@ -977,6 +1039,22 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
     setShowOnboarding(false);
     try { localStorage.setItem(ONBOARDING_KEY, "1"); } catch { /* ignore */ }
   }
+
+  // Check if clone banner was dismissed in the last 7 days
+  useEffect(() => {
+    try {
+      const dismissed = localStorage.getItem("homevoice_clone_banner_dismissed");
+      if (dismissed) {
+        const dismissedAt = parseInt(dismissed, 10);
+        const sevenDays = 7 * 24 * 60 * 60 * 1000;
+        if (Date.now() - dismissedAt < sevenDays) {
+          setBannerDismissed(true);
+        } else {
+          localStorage.removeItem("homevoice_clone_banner_dismissed");
+        }
+      }
+    } catch { /* ignore */ }
+  }, []);
 
   async function simulateSteps() {
     for (let i = 0; i < STEPS.length; i++) {
@@ -1074,11 +1152,17 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
         brand_name: brandName,
       });
 
+      const newPodcastsCount = (profile.podcasts_count ?? 0) + 1;
       await supabase
         .from("profiles")
-        .update({ podcasts_this_month: usedThisMonth + 1 })
+        .update({ podcasts_this_month: usedThisMonth + 1, podcasts_count: newPodcastsCount })
         .eq("id", user.id);
-      setProfile((p) => ({ ...p, podcasts_this_month: usedThisMonth + 1 }));
+      setProfile((p) => ({ ...p, podcasts_this_month: usedThisMonth + 1, podcasts_count: newPodcastsCount }));
+
+      // Initiative 01: show voice clone modal after first podcast if not dismissed
+      if (newPodcastsCount === 1 && !clonedVoiceId && !profile.onboarding_clone_dismissed) {
+        setShowVoiceCloneModal(true);
+      }
 
       const { data: newPodcasts } = await supabase
         .from("podcasts")
@@ -1334,6 +1418,28 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
       {/* Onboarding modal */}
       {showOnboarding && <OnboardingModal onDismiss={dismissOnboarding} />}
 
+      {/* Initiative 01: Voice clone modal (post-first-podcast) */}
+      {showVoiceCloneModal && (
+        <VoiceCloneModal
+          onDismiss={async () => {
+            setShowVoiceCloneModal(false);
+            await fetch("/api/profile", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ onboarding_clone_dismissed: true }),
+            });
+            setProfile(p => ({ ...p, onboarding_clone_dismissed: true }));
+          }}
+          onGoClone={() => {
+            setShowVoiceCloneModal(false);
+            setActiveTab("profile");
+            setTimeout(() => {
+              document.getElementById("voice-clone-section")?.scrollIntoView({ behavior: "smooth" });
+            }, 100);
+          }}
+        />
+      )}
+
       {/* ── Top nav (fixed to viewport) ──────────────────────────────────── */}
       <nav className="bg-white border-b border-[#E8E4DC] px-6 py-4 fixed top-0 left-0 right-0 z-40">
         <div className="max-w-5xl mx-auto flex items-center justify-between">
@@ -1406,6 +1512,79 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
           ))}
         </div>
 
+        {/* ── Initiative 05: Profile progress indicator ─────────────────────── */}
+        {(() => {
+          const hasBrand = !!(profile.brand_name && profile.brand_name !== "HomeVoice" && profile.brand_name.trim());
+          const hasVoice = !!clonedVoiceId;
+          const hasPodcast = (profile.podcasts_count ?? podcasts.length) >= 1;
+          const completedCount = [hasBrand, hasVoice, hasPodcast].filter(Boolean).length;
+          if (completedCount === 3) return null; // hide when fully complete
+
+          const steps = [
+            {
+              label: "Set Brand Name",
+              done: hasBrand,
+              cta: () => setActiveTab("profile"),
+            },
+            {
+              label: "Clone Your Voice",
+              done: hasVoice,
+              cta: () => {
+                setActiveTab("profile");
+                setTimeout(() => document.getElementById("voice-clone-section")?.scrollIntoView({ behavior: "smooth" }), 100);
+              },
+            },
+            {
+              label: "Generate First Podcast",
+              done: hasPodcast,
+              cta: () => setActiveTab("generate"),
+            },
+          ];
+
+          return (
+            <div className="bg-white border border-[#E8E4DC] rounded-2xl px-5 py-4 mb-6 shadow-sm">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs font-semibold text-[#1B2B4B]/50 uppercase tracking-wide">Setup Progress</p>
+                <p className="text-xs font-bold text-[#1A7A6E]">{completedCount} / 3 complete</p>
+              </div>
+              <div className="flex items-center gap-0">
+                {steps.map((step, i) => (
+                  <div key={step.label} className="flex items-center flex-1 min-w-0">
+                    <button
+                      onClick={step.done ? undefined : step.cta}
+                      className={`flex items-center gap-2 min-w-0 group ${step.done ? "cursor-default" : "cursor-pointer"}`}
+                      disabled={step.done}
+                      aria-label={step.done ? `${step.label} — complete` : `${step.label} — click to set up`}
+                    >
+                      <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold transition-all ${
+                        step.done
+                          ? "bg-[#1A7A6E] text-white"
+                          : "bg-[#F5F3EF] text-[#1B2B4B]/40 group-hover:bg-[#EDF4F3] group-hover:text-[#1A7A6E]"
+                      }`}>
+                        {step.done ? (
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                          </svg>
+                        ) : i + 1}
+                      </div>
+                      <span className={`text-xs font-medium truncate transition-colors ${
+                        step.done ? "text-[#1A7A6E]" : "text-[#1B2B4B]/50 group-hover:text-[#1A7A6E]"
+                      }`}>
+                        {step.label}
+                      </span>
+                    </button>
+                    {i < steps.length - 1 && (
+                      <div className={`flex-1 h-px mx-2 transition-colors ${
+                        steps[i].done && steps[i + 1].done ? "bg-[#1A7A6E]" : steps[i].done ? "bg-[#1A7A6E]/40" : "bg-[#E8E4DC]"
+                      }`} />
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
+
         {/* ── Generate tab ──────────────────────────────────────────────────── */}
         {activeTab === "generate" && (
           <div className="space-y-5">
@@ -1421,6 +1600,44 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
                   <Link href="/signup" className="inline-block mt-3 bg-[#1A7A6E] hover:bg-[#15695F] text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
                     Upgrade to Pro →
                   </Link>
+                </div>
+              </div>
+            )}
+
+            {/* Initiative 02: Clone nudge banner */}
+            {!clonedVoiceId && !bannerDismissed && (
+              <div className="bg-[#1A7A6E] rounded-2xl p-4 flex items-center gap-4">
+                <div className="w-9 h-9 bg-white/20 rounded-xl flex items-center justify-center flex-shrink-0">
+                  <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                  </svg>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-white font-semibold text-sm">Your podcasts could sound like you.</p>
+                  <p className="text-white/70 text-xs mt-0.5">Clone your voice in 60 seconds — free, one recording.</p>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <button
+                    onClick={() => {
+                      setActiveTab("profile");
+                      setTimeout(() => {
+                        document.getElementById("voice-clone-section")?.scrollIntoView({ behavior: "smooth" });
+                      }, 100);
+                    }}
+                    className="bg-white text-[#1A7A6E] text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-white/90 transition-colors whitespace-nowrap"
+                  >
+                    Clone My Voice
+                  </button>
+                  <button
+                    onClick={() => {
+                      setBannerDismissed(true);
+                      try { localStorage.setItem("homevoice_clone_banner_dismissed", String(Date.now())); } catch { /* ignore */ }
+                    }}
+                    className="text-white/50 hover:text-white transition-colors text-lg leading-none"
+                    aria-label="Dismiss for 7 days"
+                  >
+                    ×
+                  </button>
                 </div>
               </div>
             )}
@@ -2102,8 +2319,8 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
               </form>
             </div>
 
-            {/* ── Voice Cloning card ─────────────────────────────────────── */}
-            <div className="bg-white rounded-2xl border border-[#E8E4DC] shadow-sm p-6">
+            {/* ── Voice Cloning card (Initiative 01, 02, 04) ─────────────── */}
+            <div id="voice-clone-section" className="bg-white rounded-2xl border border-[#E8E4DC] shadow-sm p-6">
               <div className="flex items-start justify-between mb-1">
                 <h3 className="font-semibold text-[#1B2B4B]">🎙️ Your Voice</h3>
                 {clonedVoiceId && (
@@ -2143,6 +2360,33 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
               ) : voiceCloneStep === "idle" || voiceCloneStep === "error" ? (
                 /* Idle — show script + record button */
                 <div className="space-y-4">
+                  {/* Initiative 04: Before/after audio preview */}
+                  <div className="border border-[#E8E4DC] rounded-xl p-4 bg-[#FAFAF8]">
+                    <p className="text-xs font-semibold text-[#1B2B4B] mb-1">Hear the difference</p>
+                    <p className="text-xs text-[#1B2B4B]/45 mb-3">This is what your podcast sounds like now vs. narrated in your own cloned voice.</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="bg-white rounded-lg border border-[#E8E4DC] p-3">
+                        <p className="text-xs font-semibold text-[#1B2B4B]/50 mb-2">Default Voice</p>
+                        <audio
+                          controls
+                          src="/audio/sample-default.mp3"
+                          className="w-full h-8"
+                          preload="none"
+                          aria-label="Default voice sample"
+                        />
+                      </div>
+                      <div className="bg-[#EDF4F3] rounded-lg border border-[#1A7A6E]/20 p-3">
+                        <p className="text-xs font-semibold text-[#1A7A6E] mb-2">Cloned Voice</p>
+                        <audio
+                          controls
+                          src="/audio/sample-cloned.mp3"
+                          className="w-full h-8"
+                          preload="none"
+                          aria-label="Cloned voice sample"
+                        />
+                      </div>
+                    </div>
+                  </div>
                   <div className="bg-[#F5F3EE] rounded-xl p-4 text-sm text-[#1B2B4B]/70 leading-relaxed">
                     <p className="font-semibold text-[#1B2B4B] mb-2">📋 Read this script out loud:</p>
                     <p>&ldquo;Welcome to HomeVoice — your personal real estate podcast. I help buyers, sellers, and investors understand the local market in a way that&apos;s clear, engaging, and totally personalized. Whether you&apos;re looking at a starter home or a major investment, I&apos;m here to break down the numbers and tell the story behind every property.&rdquo;</p>
