@@ -2360,7 +2360,8 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
               ) : voiceCloneStep === "idle" || voiceCloneStep === "error" ? (
                 /* Idle — show script + record button */
                 <div className="space-y-4">
-                  {/* Initiative 04: Before/after audio preview */}
+                  {/* Initiative 04: Before/after audio preview — only shown when sample files exist */}
+                  {false && (
                   <div className="border border-[#E8E4DC] rounded-xl p-4 bg-[#FAFAF8]">
                     <p className="text-xs font-semibold text-[#1B2B4B] mb-1">Hear the difference</p>
                     <p className="text-xs text-[#1B2B4B]/45 mb-3">This is what your podcast sounds like now vs. narrated in your own cloned voice.</p>
@@ -2387,6 +2388,7 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
                       </div>
                     </div>
                   </div>
+                  )}
                   <div className="bg-[#F5F3EE] rounded-xl p-4 text-sm text-[#1B2B4B]/70 leading-relaxed">
                     <p className="font-semibold text-[#1B2B4B] mb-2">📋 Read this script out loud:</p>
                     <p>&ldquo;Welcome to HomeVoice — your personal real estate podcast. I help buyers, sellers, and investors understand the local market in a way that&apos;s clear, engaging, and totally personalized. Whether you&apos;re looking at a starter home or a major investment, I&apos;m here to break down the numbers and tell the story behind every property.&rdquo;</p>
