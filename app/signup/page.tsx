@@ -10,7 +10,6 @@ export default function SignupPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
   const router = useRouter();
   const supabase = createClient();
 
@@ -19,7 +18,7 @@ export default function SignupPage() {
     setLoading(true);
     setError(null);
 
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: { emailRedirectTo: `${location.origin}/auth/callback` },
@@ -28,9 +27,20 @@ export default function SignupPage() {
     if (error) {
       setError(error.message);
       setLoading(false);
-    } else {
-      setSuccess(true);
+      return;
     }
+
+    // Fire welcome email non-blocking
+    if (data.user) {
+      fetch("/api/welcome-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: data.user.id, email }),
+      }).catch(() => {/* best-effort */});
+    }
+
+    // Go straight to dashboard — no email confirmation wall
+    router.push("/dashboard");
   }
 
   async function handleGoogleLogin() {
@@ -38,23 +48,6 @@ export default function SignupPage() {
       provider: "google",
       options: { redirectTo: `${location.origin}/auth/callback` },
     });
-  }
-
-  if (success) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center px-6">
-        <div className="w-full max-w-sm text-center">
-          <div className="text-4xl mb-4">📬</div>
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">Check your email</h1>
-          <p className="text-gray-500 text-sm mb-6">
-            We sent a confirmation link to <strong>{email}</strong>. Click it to activate your account.
-          </p>
-          <Link href="/login" className="text-blue-600 hover:text-blue-700 font-medium text-sm">
-            Back to sign in
-          </Link>
-        </div>
-      </div>
-    );
   }
 
   return (
