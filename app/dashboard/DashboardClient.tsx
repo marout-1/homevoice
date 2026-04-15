@@ -532,8 +532,16 @@ function CustomContentTab({
       audioEl.pause();
       setAudioPlaying(false);
     } else {
+      audioEl.currentTime = 0;
       audioEl.play().then(() => setAudioPlaying(true)).catch(() => {});
     }
+  }
+
+  function handleStop() {
+    if (!audioEl) return;
+    audioEl.pause();
+    audioEl.currentTime = 0;
+    setAudioPlaying(false);
   }
 
   function handleCopyShare() {
@@ -752,16 +760,29 @@ function CustomContentTab({
 
             {/* Audio player */}
             {audioEl && (
-              <div className="bg-[#F9F8F6] rounded-xl p-4 flex items-center gap-4 mb-4 border border-[#E8E4DC]">
-                <button
-                  onClick={handlePlayPause}
-                  className="w-10 h-10 bg-[#1A7A6E] rounded-full flex items-center justify-center text-white flex-shrink-0 hover:bg-[#15695F] transition-colors"
-                >
-                  {audioPlaying ? "⏸" : "▶"}
-                </button>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-[#1B2B4B] truncate">{ingestResult?.sourceLabel}</p>
-                  <p className="text-xs text-[#1B2B4B]/40">Custom content podcast · HomeVoice</p>
+              <div className="bg-[#F9F8F6] rounded-xl p-4 mb-4 border border-[#E8E4DC] space-y-3">
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={handlePlayPause}
+                    className="w-10 h-10 bg-[#1A7A6E] rounded-full flex items-center justify-center text-white flex-shrink-0 hover:bg-[#15695F] transition-colors text-sm"
+                  >
+                    {audioPlaying ? "⏸" : "▶"}
+                  </button>
+                  {audioPlaying && (
+                    <button
+                      onClick={handleStop}
+                      className="w-10 h-10 bg-[#1B2B4B]/10 rounded-full flex items-center justify-center text-[#1B2B4B] flex-shrink-0 hover:bg-[#1B2B4B]/20 transition-colors text-sm"
+                      title="Stop"
+                    >
+                      ⏹
+                    </button>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-[#1B2B4B] truncate">{ingestResult?.sourceLabel}</p>
+                    <p className="text-xs text-[#1B2B4B]/40">
+                      {audioPlaying ? "Now playing…" : "Custom content podcast · HomeVoice"}
+                    </p>
+                  </div>
                 </div>
               </div>
             )}
