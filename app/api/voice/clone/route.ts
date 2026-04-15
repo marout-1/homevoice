@@ -54,12 +54,25 @@ export async function POST(req: NextRequest) {
     });
 
     if (!elRes.ok) {
-      const err = await elRes.text().catch(() => "");
-      console.error("[voice/clone] ElevenLabs error:", elRes.status, err);
-      return NextResponse.json(
-        { error: `Voice cloning failed: ${elRes.status}` },
-        { status: 502 }
-      );
+      const errText = await elRes.text().catch(() => "");
+      console.error("[voice/clone] ElevenLabs error:", elRes.status, errText);
+
+      // Parse ElevenLabs error for a friendly message
+      let friendlyError = `Voice cloning failed (${elRes.status}).`;
+      if (elRes.status === 401) {
+        friendlyError = "ElevenLabs API key is invalid or missing voice cloning permissions. Please check your ElevenLabs plan — Instant Voice Cloning requires the Creator plan or higher.";
+      } else if (elRes.status === 422) {
+        friendlyError = "Audio format not accepted. Please try recording again.";
+      } else if (elRes.status === 429) {
+        friendlyError = "Too many requests. Please wait a moment and try again.";
+      }
+
+      try {
+        const errJson = JSON.parse(errText);
+        if (errJson?.detail?.message) friendlyError += ` (${errJson.detail.message})`;
+      } catch { /* not JSON */ }
+
+      return NextResponse.json({ error: friendlyError }, { status: 502 });
     }
 
     const { voice_id } = await elRes.json() as { voice_id: string };
