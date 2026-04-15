@@ -191,6 +191,25 @@ async function fetchRentcastProperty(address: string): Promise<PropertyData | nu
   }
 }
 
+// ─── Parse city/state/zip from a free-form address string ────────────────────
+
+function parseAddressParts(address: string): { city: string; state: string; zipCode: string } {
+  // Try to extract "City, ST 12345" or "City, ST" from the end of the address
+  const match = address.match(/,\s*([^,]+),\s*([A-Z]{2})\s*(\d{5})?/);
+  if (match) {
+    return {
+      city: match[1].trim(),
+      state: match[2].trim(),
+      zipCode: match[3]?.trim() ?? "",
+    };
+  }
+  // Simpler: last two comma-separated parts
+  const parts = address.split(",").map((p) => p.trim());
+  const state = parts[parts.length - 1]?.replace(/\d+/g, "").trim() ?? "";
+  const city = parts[parts.length - 2]?.trim() ?? "";
+  return { city, state, zipCode: "" };
+}
+
 // ─── Public entry point ────────────────────────────────────────────────────────
 
 export async function getPropertyData(address: string): Promise<PropertyData> {
@@ -202,8 +221,27 @@ export async function getPropertyData(address: string): Promise<PropertyData> {
   const rentcast = await fetchRentcastProperty(address);
   if (rentcast) return rentcast;
 
-  // No data found — throw so the user sees a real error
-  throw new Error(
-    `Could not find property data for "${address}". Please check the address and try again.`
-  );
+  // No data found in any source — return a minimal stub so the podcast
+  // can still be generated using Claude's knowledge of the area.
+  console.warn(`[property] No data found for "${address}" — using address-only fallback`);
+  const { city, state, zipCode } = parseAddressParts(address);
+  return {
+    address,
+    zipCode,
+    city,
+    state,
+    beds: null,
+    baths: null,
+    sqft: null,
+    yearBuilt: null,
+    zestimate: null,
+    lastSoldPrice: null,
+    lastSoldDate: null,
+    propertyType: null,
+    comps: [],
+    dataSource: "address-only",
+    imageUrls: [],
+    latitude: null,
+    longitude: null,
+  };
 }

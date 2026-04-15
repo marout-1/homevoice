@@ -265,7 +265,9 @@ CRITICAL rules for natural audio:
 - If mortgageContext is provided, use it in the OUTLOOK or TRENDS section to ground affordability ("at today's rate of X%, monthly payments on this home run about $Y")
 - If medianDaysOnMarket is provided, use it in TRENDS ("homes here are selling in about X days on average")
 - If listToSaleRatio is provided and above 99%, mention it signals a competitive market
-${agentContext ? `\nAgent personal context to weave in naturally: "${agentContext}"` : ""}`;
+${agentContext ? `\nAgent personal context to weave in naturally: "${agentContext}"` : ""}
+${property.dataSource === "address-only" ? `\nIMPORTANT: No MLS/property database record was found for this address. Do NOT mention specific bedroom/bathroom counts, square footage, price estimates, or comp sales — you don't have that data. Instead, focus the script on the neighborhood, city market trends, what makes this area attractive, and general market conditions. Make it feel like a knowledgeable local market overview rather than a specific property report.` : ""}`;
+
 
   const userPrompt = `Property and market data:
 

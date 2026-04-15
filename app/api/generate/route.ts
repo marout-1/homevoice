@@ -73,6 +73,7 @@ export async function POST(req: NextRequest) {
         lastSoldPrice: property.lastSoldPrice,
         lastSoldDate: property.lastSoldDate,
         dataSource: property.dataSource,
+        limitedData: property.dataSource === "address-only",
         imageUrls: property.imageUrls ?? [],
         latitude: property.latitude ?? null,
         longitude: property.longitude ?? null,
