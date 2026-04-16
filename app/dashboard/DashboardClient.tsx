@@ -1202,14 +1202,18 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
       setAudioPlaying(false);
       return;
     }
+    if (typeof window === "undefined") return;
+    window.speechSynthesis.cancel();
+    setAudioPlaying(false);
+  }
 
   async function handleCopyLink() {
-    if (!currentPodcast?.id && !savedPodcastId) return;
-    const podcastId = savedPodcastId || currentPodcast?.id;
-    const url = `${window.location.origin}/r/${podcastId}`;
+    if (!savedPodcastId) return;
+    const url = `${window.location.origin}/r/${savedPodcastId}`;
     try {
       await navigator.clipboard.writeText(url);
     } catch {
+      // iOS Safari fallback
       const el = document.createElement("textarea");
       el.value = url;
       el.style.position = "fixed";
@@ -1222,10 +1226,6 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
     }
     setShareCopied(true);
     setTimeout(() => setShareCopied(false), 2000);
-  }
-    if (typeof window === "undefined") return;
-    window.speechSynthesis.cancel();
-    setAudioPlaying(false);
   }
 
   // ── Voice cloning handlers ────────────────────────────────────────────────
