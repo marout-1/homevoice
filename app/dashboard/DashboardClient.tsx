@@ -930,7 +930,7 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
   const [addressWarning, setAddressWarning] = useState<string | null>(null);
 
   // Profile form state
-  const [newBrandName, setNewBrandName] = useState(profile.brand_name);
+  const [newBrandName, setNewBrandName] = useState(profile.brand_name ?? "HomeVoice");
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileSaved, setProfileSaved] = useState(false);
 
@@ -1313,15 +1313,17 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
   async function handleSaveProfile(e: React.FormEvent) {
     e.preventDefault();
     setSavingProfile(true);
-    const { error: saveErr } = await supabase.from("profiles").update({ brand_name: newBrandName }).eq("id", user.id);
-    setProfile((p) => ({ ...p, brand_name: newBrandName }));
-    setBrandName(newBrandName);
+    const trimmed = (newBrandName ?? "").trim() || "HomeVoice";
+    const { error: saveErr } = await supabase.from("profiles").update({ brand_name: trimmed }).eq("id", user.id);
     setSavingProfile(false);
-    setProfileSaved(true);
-    setTimeout(() => setProfileSaved(false), 2000);
     if (saveErr) {
       showToast("Failed to save brand name. Please try again.", "error");
     } else {
+      setNewBrandName(trimmed);
+      setProfile((p) => ({ ...p, brand_name: trimmed }));
+      setBrandName(trimmed);
+      setProfileSaved(true);
+      setTimeout(() => setProfileSaved(false), 2000);
       showToast("Brand name saved!");
     }
   }
