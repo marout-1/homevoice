@@ -1338,7 +1338,8 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
       .upsert({ id: user.id, brand_name: trimmed }, { onConflict: "id" });
     setSavingProfile(false);
     if (saveErr) {
-      showToast("Failed to save brand name. Please try again.", "error");
+      console.error("Brand name save error:", JSON.stringify(saveErr));
+      showToast(`Save failed: ${saveErr.message || saveErr.code || "unknown error"}`, "error");
     } else {
       setNewBrandName(trimmed);
       setProfile((p) => ({ ...p, brand_name: trimmed }));
