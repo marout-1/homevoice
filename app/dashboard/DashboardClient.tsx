@@ -1332,7 +1332,10 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
     e.preventDefault();
     setSavingProfile(true);
     const trimmed = (newBrandName ?? "").trim() || "HomeVoice";
-    const { error: saveErr } = await supabase.from("profiles").update({ brand_name: trimmed }).eq("id", user.id);
+    // Use upsert so it works whether or not the profiles row exists yet
+    const { error: saveErr } = await supabase
+      .from("profiles")
+      .upsert({ id: user.id, brand_name: trimmed }, { onConflict: "id" });
     setSavingProfile(false);
     if (saveErr) {
       showToast("Failed to save brand name. Please try again.", "error");
