@@ -910,7 +910,7 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
   const [agentContext, setAgentContext] = useState("");
   const [podcastTone, setPodcastTone] = useState("friendly");
   const [podcastFormat, setPodcastFormat] = useState("market-compass");
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(true);
   const [loading, setLoading] = useState(false);
   const [audioPlaying, setAudioPlaying] = useState(false);
   const [audioReady, setAudioReady] = useState(false);
@@ -982,21 +982,17 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
     } catch { /* ignore */ }
   }, []);
 
-  // On load: route new users to the right setup step
-  // Step 1 — no brand name set → stay on Profile (default tab)
-  // Step 2 — brand set but no voice → Profile, scroll to voice clone section
-  // Both done → send to Generate
+  // On load: route based on voice clone status only
+  // No voice → Profile tab (voice clone section) — step 1
+  // Has voice → Generate tab directly
   useEffect(() => {
-    const hasBrand = !!(initialProfile.brand_name && initialProfile.brand_name !== "HomeVoice" && initialProfile.brand_name.trim());
     const hasVoice = !!(initialProfile.cloned_voice_id);
-    if (hasBrand && hasVoice) {
+    if (hasVoice) {
       setActiveTab("generate");
-    } else if (hasBrand && !hasVoice) {
-      // Stay on profile, scroll to voice clone section after mount
+    } else {
       setActiveTab("profile");
       setTimeout(() => document.getElementById("voice-clone-section")?.scrollIntoView({ behavior: "smooth", block: "start" }), 400);
     }
-    // else: no brand → default "profile" tab, no scroll needed
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1458,10 +1454,8 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
       <div className="max-w-5xl mx-auto px-6 py-8">
         {/* ── Tab nav ───────────────────────────────────────────────────────── */}
         {(() => {
-          const hasBrandForNav = !!(profile.brand_name && profile.brand_name !== "HomeVoice" && profile.brand_name.trim());
-          const hasVoiceForNav = !!clonedVoiceId;
-          // Generate/Custom/History are locked until both brand + voice are done
-          const generateUnlocked = hasBrandForNav && hasVoiceForNav;
+          // Generate/Custom/History locked until voice is cloned
+          const generateUnlocked = !!clonedVoiceId;
           return (
             <div role="tablist" className="flex gap-1 bg-[#F5F3EF] border border-[#E8E4DC] p-1 rounded-xl w-fit mb-8">
               {([
@@ -1477,7 +1471,7 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
                   onClick={() => { if (!tab.locked) setActiveTab(tab.id); }}
                   aria-selected={activeTab === tab.id}
                   aria-disabled={tab.locked}
-                  title={tab.locked ? "Complete setup steps 1 & 2 first" : undefined}
+                  title={tab.locked ? "Clone your voice first to unlock" : undefined}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-all relative ${
                     tab.locked
                       ? "text-[#1B2B4B]/25 cursor-not-allowed"
@@ -1498,18 +1492,12 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
 
         {/* ── Initiative 05: Profile progress indicator ─────────────────────── */}
         {(() => {
-          const hasBrand = !!(profile.brand_name && profile.brand_name !== "HomeVoice" && profile.brand_name.trim());
           const hasVoice = !!clonedVoiceId;
           const hasPodcast = (profile.podcasts_count ?? podcasts.length) >= 1;
-          const completedCount = [hasBrand, hasVoice, hasPodcast].filter(Boolean).length;
-          if (completedCount === 3) return null; // hide when fully complete
+          const completedCount = [hasVoice, hasPodcast].filter(Boolean).length;
+          if (completedCount === 2) return null; // hide when fully complete
 
           const steps = [
-            {
-              label: "Set Brand Name",
-              done: hasBrand,
-              cta: () => setActiveTab("profile"),
-            },
             {
               label: "Clone Your Voice",
               done: hasVoice,
@@ -1530,7 +1518,7 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
               <div className="flex items-center justify-between mb-3">
               <p className="text-xs font-semibold text-[#1B2B4B]/40 uppercase tracking-widest mb-3">Get set up</p>
                 <p className="text-xs font-semibold text-[#1B2B4B]/50 uppercase tracking-wide">Setup Progress</p>
-                <p className="text-xs font-bold text-[#1A7A6E]">{completedCount} / 3 complete</p>
+                <p className="text-xs font-bold text-[#1A7A6E]">{completedCount} / 2 complete</p>
               </div>
               <div className="flex items-center gap-0">
                 {steps.map((step, i) => (
@@ -1601,7 +1589,7 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
                   </div>
                   <div>
                     <p className="text-white font-bold text-base leading-tight">Clone your voice first</p>
-                    <p className="text-white/70 text-xs mt-0.5">Step 2 of 3 — takes about 60 seconds</p>
+                    <p className="text-white/70 text-xs mt-0.5">Step 1 of 2 — takes about 60 seconds</p>
                   </div>
                 </div>
 
