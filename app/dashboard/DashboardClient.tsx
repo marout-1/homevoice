@@ -1546,8 +1546,74 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
               </div>
             )}
 
+            {/* Voice clone gate — shown when user hasn't cloned their voice yet */}
+            {!clonedVoiceId && !loading && !result && (
+              <div className="bg-white rounded-2xl border-2 border-[#1A7A6E]/20 shadow-sm overflow-hidden">
+                {/* Teal header band */}
+                <div className="bg-[#1A7A6E] px-6 py-4 flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+                    <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <p className="text-white font-bold text-base leading-tight">Clone your voice first</p>
+                    <p className="text-white/70 text-xs mt-0.5">Step 2 of 3 — takes about 60 seconds</p>
+                  </div>
+                </div>
+
+                <div className="px-6 py-5">
+                  <p className="text-[#1B2B4B]/70 text-sm mb-5 leading-relaxed">
+                    HomeVoice podcasts are narrated in <span className="font-semibold text-[#1B2B4B]">your voice</span>. Before you can generate your first podcast, you need to record a short voice sample so we can clone it.
+                  </p>
+
+                  {/* What to expect */}
+                  <div className="space-y-3 mb-6">
+                    {[
+                      { icon: "🎙️", title: "Record 60 seconds of your voice", desc: "Read a short script we provide — no special equipment needed" },
+                      { icon: "⚡", title: "We clone it instantly", desc: "Our AI creates a voice model that sounds just like you" },
+                      { icon: "🏡", title: "Every podcast in your voice", desc: "All your generated reports will be narrated by you, automatically" },
+                    ].map((item) => (
+                      <div key={item.title} className="flex items-start gap-3">
+                        <span className="text-base shrink-0 mt-0.5">{item.icon}</span>
+                        <div>
+                          <p className="text-sm font-semibold text-[#1B2B4B]">{item.title}</p>
+                          <p className="text-xs text-[#1B2B4B]/45 mt-0.5">{item.desc}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab("profile");
+                      setTimeout(() => document.getElementById("voice-clone-section")?.scrollIntoView({ behavior: "smooth", block: "start" }), 120);
+                    }}
+                    className="w-full bg-[#1A7A6E] hover:bg-[#15695F] text-white font-bold py-3.5 rounded-xl text-base transition-colors flex items-center justify-center gap-2"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                    </svg>
+                    Clone My Voice Now →
+                  </button>
+
+                  <p className="text-center text-xs text-[#1B2B4B]/30 mt-3">
+                    Already cloned?{" "}
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab("profile")}
+                      className="text-[#1A7A6E] hover:underline font-medium"
+                    >
+                      Check your profile
+                    </button>
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Generate form */}
-            {!result && (
+            {clonedVoiceId && !result && (
               <div className="bg-white rounded-2xl border border-[#E8E4DC] shadow-sm p-6">
                 <h2 className="font-bold text-[#1B2B4B] text-lg mb-1">Generate a podcast</h2>
                 <p className="text-[#1B2B4B]/45 text-sm mb-5">Enter any US property address to create a narrated market report.</p>
