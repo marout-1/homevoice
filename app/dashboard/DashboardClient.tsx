@@ -900,7 +900,7 @@ function formatCurrency(n: number | null): string {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function DashboardClient({ user, profile: initialProfile, podcasts: initialPodcasts }: Props) {
-  const [activeTab, setActiveTab] = useState<"generate" | "custom" | "history" | "profile">("generate");
+  const [activeTab, setActiveTab] = useState<"generate" | "custom" | "history" | "profile">("profile");
   const [profile, setProfile] = useState(initialProfile);
   const [podcasts, setPodcasts] = useState(initialPodcasts);
 
@@ -980,6 +980,24 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
       const seen = localStorage.getItem(ONBOARDING_KEY);
       if (!seen) setShowOnboarding(true);
     } catch { /* ignore */ }
+  }, []);
+
+  // On load: route new users to the right setup step
+  // Step 1 — no brand name set → stay on Profile (default tab)
+  // Step 2 — brand set but no voice → Profile, scroll to voice clone section
+  // Both done → send to Generate
+  useEffect(() => {
+    const hasBrand = !!(initialProfile.brand_name && initialProfile.brand_name !== "HomeVoice" && initialProfile.brand_name.trim());
+    const hasVoice = !!(initialProfile.cloned_voice_id);
+    if (hasBrand && hasVoice) {
+      setActiveTab("generate");
+    } else if (hasBrand && !hasVoice) {
+      // Stay on profile, scroll to voice clone section after mount
+      setActiveTab("profile");
+      setTimeout(() => document.getElementById("voice-clone-section")?.scrollIntoView({ behavior: "smooth", block: "start" }), 400);
+    }
+    // else: no brand → default "profile" tab, no scroll needed
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -1324,7 +1342,13 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
       setBrandName(trimmed);
       setProfileSaved(true);
       setTimeout(() => setProfileSaved(false), 2000);
-      showToast("Brand name saved!");
+      // If voice not yet cloned, nudge them to step 2
+      if (!clonedVoiceId) {
+        showToast("Brand name saved! Now clone your voice below ↓");
+        setTimeout(() => document.getElementById("voice-clone-section")?.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
+      } else {
+        showToast("Brand name saved!");
+      }
     }
   }
 
@@ -1429,29 +1453,44 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
       <div className="min-h-screen bg-[#FAFAF8] pt-[65px]">
       <div className="max-w-5xl mx-auto px-6 py-8">
         {/* ── Tab nav ───────────────────────────────────────────────────────── */}
-        <div role="tablist" className="flex gap-1 bg-[#F5F3EF] border border-[#E8E4DC] p-1 rounded-xl w-fit mb-8">
-          {([
-            { id: "generate", label: "🎙️ Generate" },
-            { id: "custom",   label: "📄 Custom Content" },
-            { id: "history",  label: "📚 History" },
-            { id: "profile",  label: "⚙️ Profile" },
-          ] as const).map((tab) => (
-            <button
-              key={tab.id}
-              role="tab"
-              type="button"
-              onClick={() => setActiveTab(tab.id)}
-              aria-selected={activeTab === tab.id}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                activeTab === tab.id
-                  ? "bg-white text-[#1B2B4B] shadow-sm border border-[#E8E4DC]"
-                  : "text-[#1B2B4B]/45 hover:text-[#1B2B4B]/70"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
+        {(() => {
+          const hasBrandForNav = !!(profile.brand_name && profile.brand_name !== "HomeVoice" && profile.brand_name.trim());
+          const hasVoiceForNav = !!clonedVoiceId;
+          // Generate/Custom/History are locked until both brand + voice are done
+          const generateUnlocked = hasBrandForNav && hasVoiceForNav;
+          return (
+            <div role="tablist" className="flex gap-1 bg-[#F5F3EF] border border-[#E8E4DC] p-1 rounded-xl w-fit mb-8">
+              {([
+                { id: "generate", label: "🎙️ Generate", locked: !generateUnlocked },
+                { id: "custom",   label: "📄 Custom Content", locked: !generateUnlocked },
+                { id: "history",  label: "📚 History", locked: !generateUnlocked },
+                { id: "profile",  label: "⚙️ Profile", locked: false },
+              ] as const).map((tab) => (
+                <button
+                  key={tab.id}
+                  role="tab"
+                  type="button"
+                  onClick={() => { if (!tab.locked) setActiveTab(tab.id); }}
+                  aria-selected={activeTab === tab.id}
+                  aria-disabled={tab.locked}
+                  title={tab.locked ? "Complete setup steps 1 & 2 first" : undefined}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all relative ${
+                    tab.locked
+                      ? "text-[#1B2B4B]/25 cursor-not-allowed"
+                      : activeTab === tab.id
+                      ? "bg-white text-[#1B2B4B] shadow-sm border border-[#E8E4DC]"
+                      : "text-[#1B2B4B]/45 hover:text-[#1B2B4B]/70"
+                  }`}
+                >
+                  {tab.label}
+                  {tab.locked && (
+                    <span className="ml-1 text-[10px] opacity-50">🔒</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          );
+        })()}
 
         {/* ── Initiative 05: Profile progress indicator ─────────────────────── */}
         {(() => {
