@@ -900,7 +900,7 @@ function formatCurrency(n: number | null): string {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function DashboardClient({ user, profile: initialProfile, podcasts: initialPodcasts }: Props) {
-  const [activeTab, setActiveTab] = useState<"generate" | "custom" | "history" | "profile">("profile");
+  const [activeTab, setActiveTab] = useState<"generate" | "custom" | "history" | "profile">("generate");
   const [profile, setProfile] = useState(initialProfile);
   const [podcasts, setPodcasts] = useState(initialPodcasts);
 
@@ -910,7 +910,7 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
   const [agentContext, setAgentContext] = useState("");
   const [podcastTone, setPodcastTone] = useState("friendly");
   const [podcastFormat, setPodcastFormat] = useState("market-compass");
-  const [showAdvanced, setShowAdvanced] = useState(true);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [loading, setLoading] = useState(false);
   const [audioPlaying, setAudioPlaying] = useState(false);
   const [audioReady, setAudioReady] = useState(false);
@@ -930,7 +930,7 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
   const [addressWarning, setAddressWarning] = useState<string | null>(null);
 
   // Profile form state
-  const [newBrandName, setNewBrandName] = useState(profile.brand_name ?? "HomeVoice");
+  const [newBrandName, setNewBrandName] = useState(profile.brand_name);
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileSaved, setProfileSaved] = useState(false);
 
@@ -980,20 +980,6 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
       const seen = localStorage.getItem(ONBOARDING_KEY);
       if (!seen) setShowOnboarding(true);
     } catch { /* ignore */ }
-  }, []);
-
-  // On load: route based on voice clone status only
-  // No voice → Profile tab (voice clone section) — step 1
-  // Has voice → Generate tab directly
-  useEffect(() => {
-    const hasVoice = !!(initialProfile.cloned_voice_id);
-    if (hasVoice) {
-      setActiveTab("generate");
-    } else {
-      setActiveTab("profile");
-      setTimeout(() => document.getElementById("voice-clone-section")?.scrollIntoView({ behavior: "smooth", block: "start" }), 400);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -1327,28 +1313,16 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
   async function handleSaveProfile(e: React.FormEvent) {
     e.preventDefault();
     setSavingProfile(true);
-    const trimmed = (newBrandName ?? "").trim() || "HomeVoice";
-    // Use upsert so it works whether or not the profiles row exists yet
-    const { error: saveErr } = await supabase
-      .from("profiles")
-      .upsert({ id: user.id, brand_name: trimmed }, { onConflict: "id" });
+    const { error: saveErr } = await supabase.from("profiles").update({ brand_name: newBrandName }).eq("id", user.id);
+    setProfile((p) => ({ ...p, brand_name: newBrandName }));
+    setBrandName(newBrandName);
     setSavingProfile(false);
+    setProfileSaved(true);
+    setTimeout(() => setProfileSaved(false), 2000);
     if (saveErr) {
-      console.error("Brand name save error:", JSON.stringify(saveErr));
-      showToast(`Save failed: ${saveErr.message || saveErr.code || "unknown error"}`, "error");
+      showToast("Failed to save brand name. Please try again.", "error");
     } else {
-      setNewBrandName(trimmed);
-      setProfile((p) => ({ ...p, brand_name: trimmed }));
-      setBrandName(trimmed);
-      setProfileSaved(true);
-      setTimeout(() => setProfileSaved(false), 2000);
-      // If voice not yet cloned, nudge them to step 2
-      if (!clonedVoiceId) {
-        showToast("Brand name saved! Now clone your voice below ↓");
-        setTimeout(() => document.getElementById("voice-clone-section")?.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
-      } else {
-        showToast("Brand name saved!");
-      }
+      showToast("Brand name saved!");
     }
   }
 
@@ -1453,51 +1427,44 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
       <div className="min-h-screen bg-[#FAFAF8] pt-[65px]">
       <div className="max-w-5xl mx-auto px-6 py-8">
         {/* ── Tab nav ───────────────────────────────────────────────────────── */}
-        {(() => {
-          // Generate/Custom/History locked until voice is cloned
-          const generateUnlocked = !!clonedVoiceId;
-          return (
-            <div role="tablist" className="flex gap-1 bg-[#F5F3EF] border border-[#E8E4DC] p-1 rounded-xl w-fit mb-8">
-              {([
-                { id: "generate", label: "🎙️ Generate", locked: !generateUnlocked },
-                { id: "custom",   label: "📄 Custom Content", locked: !generateUnlocked },
-                { id: "history",  label: "📚 History", locked: !generateUnlocked },
-                { id: "profile",  label: "⚙️ Profile", locked: false },
-              ] as const).map((tab) => (
-                <button
-                  key={tab.id}
-                  role="tab"
-                  type="button"
-                  onClick={() => { if (!tab.locked) setActiveTab(tab.id); }}
-                  aria-selected={activeTab === tab.id}
-                  aria-disabled={tab.locked}
-                  title={tab.locked ? "Clone your voice first to unlock" : undefined}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all relative ${
-                    tab.locked
-                      ? "text-[#1B2B4B]/25 cursor-not-allowed"
-                      : activeTab === tab.id
-                      ? "bg-white text-[#1B2B4B] shadow-sm border border-[#E8E4DC]"
-                      : "text-[#1B2B4B]/45 hover:text-[#1B2B4B]/70"
-                  }`}
-                >
-                  {tab.label}
-                  {tab.locked && (
-                    <span className="ml-1 text-[10px] opacity-50">🔒</span>
-                  )}
-                </button>
-              ))}
-            </div>
-          );
-        })()}
+        <div role="tablist" className="flex gap-1 bg-[#F5F3EF] border border-[#E8E4DC] p-1 rounded-xl w-fit mb-8">
+          {([
+            { id: "generate", label: "🎙️ Generate" },
+            { id: "custom",   label: "📄 Custom Content" },
+            { id: "history",  label: "📚 History" },
+            { id: "profile",  label: "⚙️ Profile" },
+          ] as const).map((tab) => (
+            <button
+              key={tab.id}
+              role="tab"
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              aria-selected={activeTab === tab.id}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                activeTab === tab.id
+                  ? "bg-white text-[#1B2B4B] shadow-sm border border-[#E8E4DC]"
+                  : "text-[#1B2B4B]/45 hover:text-[#1B2B4B]/70"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
 
         {/* ── Initiative 05: Profile progress indicator ─────────────────────── */}
         {(() => {
+          const hasBrand = !!(profile.brand_name && profile.brand_name !== "HomeVoice" && profile.brand_name.trim());
           const hasVoice = !!clonedVoiceId;
           const hasPodcast = (profile.podcasts_count ?? podcasts.length) >= 1;
-          const completedCount = [hasVoice, hasPodcast].filter(Boolean).length;
-          if (completedCount === 2) return null; // hide when fully complete
+          const completedCount = [hasBrand, hasVoice, hasPodcast].filter(Boolean).length;
+          if (completedCount === 3) return null; // hide when fully complete
 
           const steps = [
+            {
+              label: "Set Brand Name",
+              done: hasBrand,
+              cta: () => setActiveTab("profile"),
+            },
             {
               label: "Clone Your Voice",
               done: hasVoice,
@@ -1518,7 +1485,7 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
               <div className="flex items-center justify-between mb-3">
               <p className="text-xs font-semibold text-[#1B2B4B]/40 uppercase tracking-widest mb-3">Get set up</p>
                 <p className="text-xs font-semibold text-[#1B2B4B]/50 uppercase tracking-wide">Setup Progress</p>
-                <p className="text-xs font-bold text-[#1A7A6E]">{completedCount} / 2 complete</p>
+                <p className="text-xs font-bold text-[#1A7A6E]">{completedCount} / 3 complete</p>
               </div>
               <div className="flex items-center gap-0">
                 {steps.map((step, i) => (
@@ -1577,74 +1544,8 @@ export default function DashboardClient({ user, profile: initialProfile, podcast
               </div>
             )}
 
-            {/* Voice clone gate — shown when user hasn't cloned their voice yet */}
-            {!clonedVoiceId && !loading && !result && (
-              <div className="bg-white rounded-2xl border-2 border-[#1A7A6E]/20 shadow-sm overflow-hidden">
-                {/* Teal header band */}
-                <div className="bg-[#1A7A6E] px-6 py-4 flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center shrink-0">
-                    <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                    </svg>
-                  </div>
-                  <div>
-                    <p className="text-white font-bold text-base leading-tight">Clone your voice first</p>
-                    <p className="text-white/70 text-xs mt-0.5">Step 1 of 2 — takes about 60 seconds</p>
-                  </div>
-                </div>
-
-                <div className="px-6 py-5">
-                  <p className="text-[#1B2B4B]/70 text-sm mb-5 leading-relaxed">
-                    HomeVoice podcasts are narrated in <span className="font-semibold text-[#1B2B4B]">your voice</span>. Before you can generate your first podcast, you need to record a short voice sample so we can clone it.
-                  </p>
-
-                  {/* What to expect */}
-                  <div className="space-y-3 mb-6">
-                    {[
-                      { icon: "🎙️", title: "Record 60 seconds of your voice", desc: "Read a short script we provide — no special equipment needed" },
-                      { icon: "⚡", title: "We clone it instantly", desc: "Our AI creates a voice model that sounds just like you" },
-                      { icon: "🏡", title: "Every podcast in your voice", desc: "All your generated reports will be narrated by you, automatically" },
-                    ].map((item) => (
-                      <div key={item.title} className="flex items-start gap-3">
-                        <span className="text-base shrink-0 mt-0.5">{item.icon}</span>
-                        <div>
-                          <p className="text-sm font-semibold text-[#1B2B4B]">{item.title}</p>
-                          <p className="text-xs text-[#1B2B4B]/45 mt-0.5">{item.desc}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveTab("profile");
-                      setTimeout(() => document.getElementById("voice-clone-section")?.scrollIntoView({ behavior: "smooth", block: "start" }), 120);
-                    }}
-                    className="w-full bg-[#1A7A6E] hover:bg-[#15695F] text-white font-bold py-3.5 rounded-xl text-base transition-colors flex items-center justify-center gap-2"
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                    </svg>
-                    Clone My Voice Now →
-                  </button>
-
-                  <p className="text-center text-xs text-[#1B2B4B]/30 mt-3">
-                    Already cloned?{" "}
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab("profile")}
-                      className="text-[#1A7A6E] hover:underline font-medium"
-                    >
-                      Check your profile
-                    </button>
-                  </p>
-                </div>
-              </div>
-            )}
-
             {/* Generate form */}
-            {clonedVoiceId && !result && (
+            {!result && (
               <div className="bg-white rounded-2xl border border-[#E8E4DC] shadow-sm p-6">
                 <h2 className="font-bold text-[#1B2B4B] text-lg mb-1">Generate a podcast</h2>
                 <p className="text-[#1B2B4B]/45 text-sm mb-5">Enter any US property address to create a narrated market report.</p>
